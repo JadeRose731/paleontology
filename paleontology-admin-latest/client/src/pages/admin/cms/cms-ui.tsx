@@ -19,6 +19,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { uploadCmsMedia } from "@/lib/cms-api";
+import { toast } from "sonner";
 import { Plus, Edit, Eye, Pin, Archive, Trash2, ArrowUp, ArrowDown, Bold, Italic, Link2, Image, Code, EyeIcon } from "lucide-react";
 import { type CmsArticle, type CmsContentStatus, CMS_STATUS_LABELS } from "./cms-data";
 
@@ -89,7 +91,7 @@ export function RichTextEditor({
             >
               <Image className="h-3.5 w-3.5" />
             </Button>
-            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => wrapSelection("<table><tr><td>", "</td></tr></table>", "")}>
+            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => wrapSelection("<table><tr><td>", "</td></tr></table>")}>
               表格
             </Button>
           </div>
@@ -254,23 +256,51 @@ export function ImageUploadField({
   value: string;
   onChange: (url: string) => void;
 }) {
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (file: File) => {
+    setUploading(true);
+    try {
+      const entry = await uploadCmsMedia(file, label, "image");
+      const url = entry.mediaUrl ?? entry.fileUrl ?? entry.coverUrl ?? "";
+      if (!url) throw new Error("上传成功但未返回地址");
+      onChange(url);
+      toast.success("图片已上传");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "图片上传失败");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <Input value={value} onChange={e => onChange(e.target.value)} placeholder="图片 URL 或上传本地文件" />
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="图片 URL（https://…）或下方选择本地文件上传"
+      />
       <Input
         type="file"
         accept="image/*"
         className="text-xs"
+        disabled={uploading}
         onChange={e => {
           const file = e.target.files?.[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => onChange(reader.result as string);
-          reader.readAsDataURL(file);
+          if (file) void handleFile(file);
+          e.target.value = "";
         }}
       />
-      {value && <img src={value} alt="" className="h-16 w-16 object-cover rounded border" />}
+      {uploading && <p className="text-xs text-muted-foreground">上传中…</p>}
+      {value && !value.startsWith("data:") && (
+        <img src={value} alt="" className="h-16 w-auto max-w-full object-cover rounded border" />
+      )}
+      {value.startsWith("data:") && (
+        <p className="text-xs text-amber-700">
+          检测到 Base64 内嵌图，保存可能失败。请重新选择文件上传，或改用 URL 链接。
+        </p>
+      )}
     </div>
   );
 }

@@ -1,7 +1,13 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import PartyLayout from "@/components/PartyLayout";
+import { CmsRichTextBody } from "@/components/CmsPageHeader";
+import { useCmsChannel } from "@/hooks/useCmsChannel";
+import { useCmsEntries } from "@/hooks/useCmsEntries";
 
 export default function Reporting() {
+  const { channel } = useCmsChannel("/reporting");
+  const { items: guideArticles } = useCmsEntries({ moduleCode: "party", columnCode: "party_reporting" });
+
   const [submitted, setSubmitted] = useState(false);
   const [formData, setFormData] = useState({
     reportedName: "",
@@ -10,8 +16,11 @@ export default function Reporting() {
     description: "",
     reporterName: "",
     reporterContact: "",
-    isAnonymous: true
+    isAnonymous: true,
   });
+
+  const pageTitle = channel?.title ?? "违法违纪举报";
+  const guideArticle = guideArticles.find(a => a.pinned === "1") ?? guideArticles[0];
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -29,37 +38,51 @@ export default function Reporting() {
       alert("请填写被举报人姓名和具体违纪违法事实。");
       return;
     }
-    // Simulate API submission
     setSubmitted(true);
   };
 
   return (
-    <PartyLayout currentPageTitle="违法违纪举报">
+    <PartyLayout currentPageTitle={pageTitle}>
       <div className="flex flex-col gap-6">
         <div className="border-b border-fossil-stone pb-4">
           <h2 className="text-xl font-bold text-primary flex items-center gap-2">
-            <span className="w-1 h-6 bg-party-red inline-block"></span>
-            违法违纪举报与监督
+            <span className="w-1 h-6 bg-party-red inline-block" />
+            {pageTitle}
           </h2>
           <p className="text-xs text-muted-foreground mt-1">
-            公示监督举报渠道、举报须知、规范监督程序，畅通党内监督与群众监督渠道。
+            {channel?.subtitle ?? channel?.kicker ?? "公示监督举报渠道、举报须知、规范监督程序，畅通党内监督与群众监督渠道。"}
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left: Reporting Guide */}
           <div className="lg:col-span-5 flex flex-col gap-6">
             <div className="bg-red-50 border border-red-200 p-5 rounded flex flex-col gap-3">
               <h3 className="text-xs font-bold text-red-900 flex items-center gap-1.5">
                 <span className="material-symbols-outlined text-[20px]">warning</span>
                 举报须知
               </h3>
-              <ul className="flex flex-col gap-2.5 text-[11px] text-red-800 leading-relaxed list-decimal pl-4">
-                <li>举报人应当遵守国家法律法规，反映问题要客观真实，不得捏造事实、制造假证、诬告陷害他人。</li>
-                <li>提倡实名举报（请提供真实姓名、联系电话等，以便核实与反馈，我们将严格保密）。</li>
-                <li>举报内容应尽量详实，包括被举报人、违纪违法事实发生的时间、地点、具体情节及相关证据。</li>
-              </ul>
+              {guideArticle?.bodyContent ? (
+                <CmsRichTextBody html={guideArticle.bodyContent} className="text-[11px] text-red-800" />
+              ) : (
+                <ul className="flex flex-col gap-2.5 text-[11px] text-red-800 leading-relaxed list-decimal pl-4">
+                  <li>举报人应当遵守国家法律法规，反映问题要客观真实，不得捏造事实、制造假证、诬告陷害他人。</li>
+                  <li>提倡实名举报（请提供真实姓名、联系电话等，以便核实与反馈，我们将严格保密）。</li>
+                  <li>举报内容应尽量详实，包括被举报人、违纪违法事实发生的时间、地点、具体情节及相关证据。</li>
+                </ul>
+              )}
             </div>
+
+            {guideArticles.length > 1 && (
+              <div className="flex flex-col gap-3">
+                {guideArticles.slice(1).map(article => (
+                  <div key={article.entryId} className="bg-paper-bright border border-fossil-stone p-4 rounded">
+                    <h4 className="text-xs font-bold text-primary mb-2">{article.title}</h4>
+                    {article.summary && <p className="text-[11px] text-muted-foreground mb-2">{article.summary}</p>}
+                    {article.bodyContent && <CmsRichTextBody html={article.bodyContent} className="text-[11px]" />}
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="bg-paper-bright border border-fossil-stone p-5 rounded flex flex-col gap-4">
               <h3 className="text-xs font-bold text-primary flex items-center gap-1.5 pb-2 border-b border-fossil-stone">
@@ -83,14 +106,13 @@ export default function Reporting() {
             </div>
           </div>
 
-          {/* Right: Reporting Form */}
           <div className="lg:col-span-7">
             {submitted ? (
               <div className="bg-green-50 border border-green-200 p-8 rounded text-center flex flex-col items-center gap-4">
                 <span className="material-symbols-outlined text-[48px] text-green-600 block">check_circle</span>
                 <h3 className="text-base font-bold text-green-900">举报提交成功</h3>
                 <p className="text-xs text-green-800 leading-relaxed max-w-md">
-                  您的举报材料已安全提交至中国古生物学会纪律检查委员会信箱。我们将按照有关规定依规依纪认真办理并严格保密。感谢您对学会党风廉政建设的监督与支持！
+                  您的举报材料已安全提交至中国古生物学会纪律检查委员会信箱。我们将按照有关规定依规依纪认真办理并严格保密。
                 </p>
                 <button
                   onClick={() => setSubmitted(false)}
@@ -157,7 +179,7 @@ export default function Reporting() {
                     placeholder="请详述时间、地点、涉及人员、具体事实经过及证据线索（限1000字）"
                     className="border border-fossil-stone rounded px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                     required
-                  ></textarea>
+                  />
                 </div>
 
                 <div className="border-t border-fossil-stone pt-4 flex flex-col gap-3">
@@ -176,7 +198,7 @@ export default function Reporting() {
                   </div>
 
                   {!formData.isAnonymous && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-1 animate-fadeIn">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-1">
                       <div className="flex flex-col gap-1.5">
                         <label className="text-xs font-semibold text-primary">您的姓名</label>
                         <input
@@ -184,7 +206,6 @@ export default function Reporting() {
                           name="reporterName"
                           value={formData.reporterName}
                           onChange={handleInputChange}
-                          placeholder="请填写您的真实姓名"
                           className="border border-fossil-stone rounded px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>
@@ -195,7 +216,6 @@ export default function Reporting() {
                           name="reporterContact"
                           value={formData.reporterContact}
                           onChange={handleInputChange}
-                          placeholder="以便反馈核查结果"
                           className="border border-fossil-stone rounded px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                         />
                       </div>

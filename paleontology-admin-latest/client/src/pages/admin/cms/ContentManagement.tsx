@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRoute } from "wouter";
 import { useAdmin } from "@/contexts/AdminContext";
 import { ALL_SOCIETY_UNITS } from "@shared/constants";
@@ -22,7 +22,7 @@ import {
   CMS_STATUS_LABELS, CMS_BOARD_TYPE_LABELS, CMS_FILE_CATEGORY_LABELS,
   CMS_PUBLIC_FILE_CATEGORY_LABELS, CMS_PUBLIC_FILE_FORMAT_HINTS,
   GALLERY_CATEGORIES, SCIENCE_CATEGORIES, DOWNLOAD_CATEGORIES_SOCIETY,
-  generateCmsId, loadCmsDatabase, saveCmsDatabase,
+  generateCmsId, fetchCmsDatabase, saveCmsDatabase, DEFAULT_CMS,
 } from "./cms-data";
 import { CMS_SECTION_META, CMS_SECTIONS, PARTY_NAV_ITEMS } from "./cms-nav";
 import {
@@ -45,7 +45,19 @@ export default function ContentManagement() {
     return adminRole === "branch_admin" ? "branch" : "banners";
   })();
 
-  const [db, setDb] = useState<CmsDatabase>(() => loadCmsDatabase());
+  const [db, setDb] = useState<CmsDatabase>(() => structuredClone(DEFAULT_CMS));
+  const [cmsLoading, setCmsLoading] = useState(true);
+  const dbRef = useRef(db);
+  dbRef.current = db;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCmsDatabase()
+      .then(data => { if (!cancelled) setDb(data); })
+      .catch(() => toast.error("CMS 数据加载失败，请确认后端已启动 (8089)"))
+      .finally(() => { if (!cancelled) setCmsLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
   const [previewArticle, setPreviewArticle] = useState<CmsArticle | null>(null);
   const [editBanner, setEditBanner] = useState<CmsBanner | null>(null);
   const [editArticle, setEditArticle] = useState<{ kind: "news" | "announcements"; item: CmsArticle | null } | null>(null);
@@ -70,8 +82,11 @@ export default function ContentManagement() {
   const [showFormatHints, setShowFormatHints] = useState<string | null>(null);
 
   const persist = useCallback((next: CmsDatabase) => {
+    const prev = dbRef.current;
     setDb(next);
-    saveCmsDatabase(next);
+    saveCmsDatabase(next, prev)
+      .then(refreshed => setDb(refreshed))
+      .catch(() => toast.error("保存失败，请检查 CMS 后端连接"));
   }, []);
 
   const matchesScope = useCallback(
@@ -150,6 +165,14 @@ export default function ContentManagement() {
     all[b] = { ...all[b], sort: sortA };
     persist({ ...db, banners: all });
   };
+
+  if (cmsLoading) {
+    return (
+      <div className="flex items-center justify-center py-24 text-muted-foreground">
+        正在从 CMS 后端加载内容…
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -551,7 +574,7 @@ export default function ContentManagement() {
                   <SelectTrigger className="w-[140px]"><SelectValue placeholder="分类" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">全部分类</SelectItem>
-                    {[...new Set(db.media.map(m => m.category))].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    {Array.from(new Set(db.media.map(m => m.category))).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <Input type="file" className="max-w-[200px] text-xs" onChange={e => {
@@ -1081,7 +1104,7 @@ export default function ContentManagement() {
                     <Label className="text-xs">文件分类</Label>
                     <Select
                       value={editPublish.originalFile?.category ?? "document"}
-                      onValueChange={v => setEditPublish({ ...editPublish, originalFile: { ...(editPublish.originalFile ?? { name: "", url: "" }), category: v as typeof editPublish.originalFile.category } })}
+                      onValueChange={v => editPublish && setEditPublish({ ...editPublish, originalFile: { ...(editPublish.originalFile ?? { name: "", url: "" }), category: v as NonNullable<typeof editPublish.originalFile>["category"] } })}
                     >
                       <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                       <SelectContent>

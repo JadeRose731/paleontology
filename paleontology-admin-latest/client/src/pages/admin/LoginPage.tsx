@@ -37,13 +37,19 @@ export default function LoginPage() {
     }
   }, [isAdminLoggedIn, setLocation]);
 
-  const onSubmit = (data: LoginFormData) => {
+  const onSubmit = async (data: LoginFormData) => {
     setLoading(true);
     const success = adminLogin(data.email, data.password);
-    setLoading(false);
     if (success) {
+      try {
+        const { cmsLogin } = await import("@/lib/cms-api");
+        await cmsLogin("admin", "admin123");
+      } catch {
+        /* CMS 后端未启动时不阻断管理端登录 */
+      }
       setLocation("/admin/dashboard");
     }
+    setLoading(false);
   };
 
   return (

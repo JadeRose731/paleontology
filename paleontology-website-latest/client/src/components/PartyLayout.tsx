@@ -2,6 +2,7 @@ import React from "react";
 import { Link, useLocation } from "wouter";
 import { useState } from "react";
 import { useMembership } from "../contexts/MembershipContext";
+import { useCmsChannels } from "@/hooks/useCmsChannels";
 import LoginJoinDialog from "./LoginJoinDialog";
 import MembershipChoiceDialog from "./MembershipChoiceDialog";
 
@@ -44,37 +45,9 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs }:
   const isPartyPage = partyPaths.some(path => location === path || location.startsWith(path + "/"));
 
   // Pages that don't show the party sidebar or default breadcrumbs (landing pages/full-width)
-  const isFullWidthPage = isSocietyHome || isServicesPage || location === "/intro" || location === "/structure" || location === "/history" || location === "/gallery" || location === "/society-announcements" || location === "/international" || location === "/downloads-center" || location === "/regulations" || location === "/personal-center";
+  const isFullWidthPage = isSocietyHome || isServicesPage || location === "/intro" || location === "/structure" || location === "/history" || location === "/gallery" || location === "/society-announcements" || location === "/news-publish" || location === "/public-downloads" || location === "/international" || location === "/downloads-center" || location === "/regulations" || location === "/personal-center";
 
-  const navItems = [
-    { id: "announcements", title: "通知公告", icon: "campaign", path: "/announcements" },
-    { id: "organizations", title: "党群机构", icon: "account_tree", path: "/organizations" },
-    { id: "committees", title: "党委纪委", icon: "verified_user", path: "/committees" },
-    { id: "work", title: "党建工作", icon: "work", path: "/work" },
-    { id: "activities", title: "组织生活", icon: "groups", path: "/activities" },
-    { id: "team-building", title: "党员队伍建设", icon: "person_add", path: "/team-building" },
-    { id: "theory-study", title: "理论学习专栏", icon: "menu_book", path: "/theory-study" },
-    { id: "dynamics", title: "工作动态", icon: "vital_signs", path: "/dynamics" },
-    { id: "special-topics", title: "党建专题", icon: "topic", path: "/special-topics" },
-    { id: "exemplars", title: "先进典型", icon: "military_tech", path: "/exemplars" },
-    { id: "reporting", title: "违法违纪举报", icon: "shield", path: "/reporting" },
-    { id: "downloads", title: "下载中心", icon: "download", path: "/downloads" },
-  ];
-
-  // Exact links mapped to actual routes
-  const mainNavLinks = [
-    { title: "首页", path: "/" },
-    { title: "学会简介", path: "/intro" },
-    { title: "组织机构", path: "/structure" },
-    { title: "学会服务", path: "/services" },
-    { title: "党建文化", path: "/party" },
-    { title: "学会沿革", path: "/history" },
-    { title: "历史相册", path: "/gallery" },
-    { title: "会员公告", path: "/society-announcements" },
-    { title: "国际交流", path: "/international" },
-    { title: "资料下载", path: "/downloads-center" },
-    { title: "规章条例", path: "/regulations" }
-  ];
+  const { mainNavLinks, partyNavItems: navItems } = useCmsChannels();
 
   return (
     <div className="bg-paper-bright text-on-surface font-body-md antialiased min-h-screen flex flex-col">

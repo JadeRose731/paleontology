@@ -222,8 +222,12 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    strictPort: false, // Will find next available port if 3000 is busy
+    strictPort: false,
     host: true,
+    proxy: {
+      "/paleo": { target: "http://localhost:8089", changeOrigin: true },
+      "/uploads": { target: "http://localhost:8089", changeOrigin: true },
+    },
     allowedHosts: [
       ".manuspre.computer",
       ".manus.computer",

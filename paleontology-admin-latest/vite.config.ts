@@ -30,5 +30,11 @@ export default defineConfig(({ mode }) => ({
   server: {
     port: 3001,
     host: true,
+    proxy: {
+      "/paleo": { target: "http://localhost:8089", changeOrigin: true },
+      "/login": { target: "http://localhost:8089", changeOrigin: true },
+      "/getInfo": { target: "http://localhost:8089", changeOrigin: true },
+      "/uploads": { target: "http://localhost:8089", changeOrigin: true },
+    },
   },
 }));

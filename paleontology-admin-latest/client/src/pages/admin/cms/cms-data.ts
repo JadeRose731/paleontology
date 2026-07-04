@@ -334,7 +334,7 @@ export const SCIENCE_CATEGORIES = ["科普文章", "科普视频", "科普基地
 export const DOWNLOAD_CATEGORIES_SOCIETY = ["管理办法", "学术标准", "年报资料", "会员表格"];
 export const DOWNLOAD_CATEGORIES_PARTY = ["入党申请书", "思想汇报", "转正申请", "其他模板"];
 
-const DEFAULT_CMS: CmsDatabase = {
+export const DEFAULT_CMS: CmsDatabase = {
   banners: [
     {
       id: "banner-1",
@@ -856,7 +856,6 @@ function migrateArticle(raw: Partial<CmsArticle>): CmsArticle {
 
 function migratePage(raw: Partial<CmsPage>): CmsPage {
   return {
-    pageType: "richtext",
     ...raw,
     pageType: raw.pageType ?? "richtext",
   } as CmsPage;
@@ -864,7 +863,6 @@ function migratePage(raw: Partial<CmsPage>): CmsPage {
 
 function migrateMedia(raw: Partial<CmsMediaItem>): CmsMediaItem {
   return {
-    category: "未分类",
     ...raw,
     category: raw.category ?? "未分类",
   } as CmsMediaItem;
@@ -905,26 +903,56 @@ export function migrateCmsDatabase(raw: Partial<CmsDatabase>): CmsDatabase {
   };
 }
 
+/** @deprecated 使用 fetchCmsDatabase() 从 API 加载 */
 export function loadCmsDatabase(): CmsDatabase {
-  const version = localStorage.getItem(`${CMS_STORAGE_KEY}_version`);
   const stored = localStorage.getItem(CMS_STORAGE_KEY);
-  if (!stored || version !== String(CMS_SCHEMA_VERSION)) {
-    const db = structuredClone(DEFAULT_CMS);
-    saveCmsDatabase(db);
-    localStorage.setItem(`${CMS_STORAGE_KEY}_version`, String(CMS_SCHEMA_VERSION));
-    return db;
+  if (stored) {
+    try {
+      return migrateCmsDatabase(JSON.parse(stored) as Partial<CmsDatabase>);
+    } catch { /* fall through */ }
   }
-  try {
-    return migrateCmsDatabase(JSON.parse(stored) as Partial<CmsDatabase>);
-  } catch {
-    return structuredClone(DEFAULT_CMS);
-  }
+  return structuredClone(DEFAULT_CMS);
 }
 
-export function saveCmsDatabase(db: CmsDatabase): void {
+/** 从 CMS 后端 API 加载全量数据 */
+export async function fetchCmsDatabase(): Promise<CmsDatabase> {
+  const { listCmsEntries, ensureCmsAuth } = await import("@/lib/cms-api");
+  const { entriesToDatabase, MODULES } = await import("@/lib/cms-sync");
+  await ensureCmsAuth();
+  const all = (
+    await Promise.all(MODULES.map(m => listCmsEntries(m)))
+  ).flat();
+  const db = entriesToDatabase(all);
   localStorage.setItem(CMS_STORAGE_KEY, JSON.stringify(db));
-  localStorage.setItem("paleo_cms_db", JSON.stringify(db));
   localStorage.setItem(`${CMS_STORAGE_KEY}_version`, String(CMS_SCHEMA_VERSION));
+  return db;
+}
+
+/** 同步到 CMS 后端 API */
+export async function saveCmsDatabase(next: CmsDatabase, prev: CmsDatabase): Promise<CmsDatabase> {
+  const { upsertCmsEntry, deleteCmsEntry, listCmsEntries } = await import("@/lib/cms-api");
+  const { databaseToEntries } = await import("@/lib/cms-sync");
+  const prevEntries = databaseToEntries(prev);
+  const nextEntries = databaseToEntries(next);
+
+  const existingSettings = await listCmsEntries("settings");
+  for (const entry of nextEntries) {
+    if (entry.moduleCode === "settings" && entry.columnCode) {
+      const found = existingSettings.find(e => e.columnCode === entry.columnCode);
+      if (found?.entryId) entry.entryId = found.entryId;
+    }
+  }
+
+  const nextIds = new Set(nextEntries.map(e => e.entryId).filter(Boolean));
+  for (const e of prevEntries) {
+    if (e.entryId && !nextIds.has(e.entryId)) {
+      await deleteCmsEntry(e.entryId);
+    }
+  }
+  for (const entry of nextEntries) {
+    await upsertCmsEntry(entry);
+  }
+  return fetchCmsDatabase();
 }
 
 export function generateCmsId(prefix: string): string {
