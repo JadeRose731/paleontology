@@ -44,6 +44,7 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
         anonymousPaths.add("/uploads/**");
         anonymousPaths.add("/paleo/cms/public/**");
         anonymousPaths.add("/paleo/cms-channels/public/**");
+        anonymousPaths.add("/paleo/cms-layouts/public/**");
 
         handlerMapping.getHandlerMethods().forEach((RequestMappingInfo info, HandlerMethod method) -> {
             if (method.hasMethodAnnotation(Anonymous.class) || method.getBeanType().isAnnotationPresent(Anonymous.class)) {

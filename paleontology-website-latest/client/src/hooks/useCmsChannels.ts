@@ -26,6 +26,7 @@ const FALLBACK_MAIN_NAV = [
   { title: "学会沿革", path: "/history" },
   { title: "历史相册", path: "/gallery" },
   { title: "会员公告", path: "/society-announcements" },
+  { title: "新闻发布", path: "/news-publish" },
   { title: "国际交流", path: "/international" },
   { title: "资料下载", path: "/downloads-center" },
   { title: "规章条例", path: "/regulations" },

@@ -8,7 +8,7 @@ export interface CmsSectionMeta {
 export const CMS_SECTION_META: Record<string, CmsSectionMeta> = {
   banners: { title: "轮播图", subtitle: "管理首页轮播大图及跳转链接" },
   news: { title: "新闻动态", subtitle: "发布学会要闻与工作动态" },
-  pages: { title: "页面内容", subtitle: "维护学会概况、章程等富文本页面" },
+  pages: { title: "学会简介", subtitle: "维护学会概况、章程等富文本页面" },
   personnel: { title: "人员信息", subtitle: "管理理事会、常务理事会及秘书处成员" },
   awards: { title: "获奖成果", subtitle: "维护获奖年份、奖项与获奖人信息" },
   announcements: { title: "会员公告", subtitle: "发布、编辑学会及分会公告" },

@@ -6,6 +6,7 @@ import {
   LogOut, LayoutDashboard, ClipboardCheck, Users, User, UserCheck, Calendar, BarChart3,
   Receipt, Building2, ChevronDown, FileText, Image, Newspaper, Megaphone, Layout, FolderOpen,
   Settings, Flag, Award, Globe, BookOpen, Clock, Download, Images, Trophy, Handshake, FolderUp,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, ClipboardCheck, Users, User, UserCheck, Calendar, BarChart3, Receipt,
   Building2, FileText, Image, Newspaper, Megaphone, Layout, FolderOpen, Settings, Flag,
-  Award, Globe, BookOpen, Clock, Download, Images, Trophy, Handshake, FolderUp,
+  Award, Globe, BookOpen, Clock, Download, Images, Trophy, Handshake, FolderUp, SlidersHorizontal,
 };
 
 const ROLE_LABELS: Record<string, string> = {

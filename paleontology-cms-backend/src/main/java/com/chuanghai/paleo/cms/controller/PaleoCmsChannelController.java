@@ -7,11 +7,15 @@ import com.chuanghai.paleo.cms.common.BaseController;
 import com.chuanghai.paleo.cms.common.TableDataInfo;
 import com.chuanghai.paleo.cms.domain.PaleoCmsBlock;
 import com.chuanghai.paleo.cms.domain.PaleoCmsChannel;
+import com.chuanghai.paleo.cms.domain.PaleoCmsEntry;
 import com.chuanghai.paleo.cms.security.Anonymous;
 import com.chuanghai.paleo.cms.security.LoginUser;
 import com.chuanghai.paleo.cms.service.CmsScopeService;
 import com.chuanghai.paleo.cms.service.PaleoCmsBlockService;
 import com.chuanghai.paleo.cms.service.PaleoCmsChannelService;
+import com.chuanghai.paleo.cms.service.PaleoCmsEntryService;
+import com.chuanghai.paleo.cms.util.CmsChannelTreeUtil;
+import com.chuanghai.paleo.cms.util.CmsContentFilterUtil;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Api(tags = "CMS栏目编排")
 @RestController
@@ -34,7 +39,22 @@ public class PaleoCmsChannelController extends BaseController {
     private PaleoCmsBlockService blockService;
 
     @Autowired
+    private PaleoCmsEntryService entryService;
+
+    @Autowired
     private CmsScopeService scopeService;
+
+    @ApiOperation("管理端-栏目树")
+    @GetMapping("/tree")
+    public AjaxResult tree(PaleoCmsChannel query) {
+        LoginUser user = currentUser();
+        if (user != null && "branch_admin".equals(user.getRole()) && StringUtils.hasText(user.getBranchId())) {
+            query.setAssociationId(Long.parseLong(user.getBranchId()));
+        }
+        List<PaleoCmsChannel> channels = channelService.list(channelQuery(query)
+                .orderByAsc(PaleoCmsChannel::getSortOrder));
+        return success(CmsChannelTreeUtil.buildTree(channels, 0L));
+    }
 
     @ApiOperation("管理端-栏目列表")
     @GetMapping("/list")
@@ -97,6 +117,55 @@ public class PaleoCmsChannelController extends BaseController {
         Map<String, Object> data = new HashMap<>();
         data.put("channel", channel);
         data.put("blocks", blocks);
+        return success(data);
+    }
+
+    @Anonymous
+    @ApiOperation("公开-页面解析（栏目+区块+内容）")
+    @GetMapping("/public/resolve")
+    public AjaxResult publicResolve(@RequestParam(required = false) String routePath,
+                                    @RequestParam(required = false) String channelCode) {
+        if (!StringUtils.hasText(routePath) && !StringUtils.hasText(channelCode)) {
+            return error("routePath 或 channelCode 至少传一个");
+        }
+        PaleoCmsChannel channel = channelService.getOne(channelQuery(new PaleoCmsChannel())
+                .eq(StringUtils.hasText(routePath), PaleoCmsChannel::getRoutePath, routePath)
+                .eq(StringUtils.hasText(channelCode), PaleoCmsChannel::getChannelCode, channelCode)
+                .eq(PaleoCmsChannel::getVisible, "1")
+                .eq(PaleoCmsChannel::getStatus, "PUBLISHED")
+                .last("LIMIT 1"));
+        if (channel == null) {
+            return error("栏目不存在或未发布");
+        }
+        List<PaleoCmsBlock> blocks = blockService.list(new LambdaQueryWrapper<PaleoCmsBlock>()
+                .eq(PaleoCmsBlock::getChannelId, channel.getChannelId())
+                .eq(PaleoCmsBlock::getVisible, "1")
+                .eq(PaleoCmsBlock::getStatus, "PUBLISHED")
+                .ne(PaleoCmsBlock::getDeleted, "1")
+                .orderByAsc(PaleoCmsBlock::getSortOrder));
+        PaleoCmsEntry entryQuery = buildEntryQuery(channel);
+        List<PaleoCmsEntry> entries = entryService.list(new LambdaQueryWrapper<PaleoCmsEntry>()
+                .ne(PaleoCmsEntry::getDeleted, "1")
+                .eq(PaleoCmsEntry::getStatus, "PUBLISHED")
+                .eq(StringUtils.hasText(entryQuery.getModuleCode()), PaleoCmsEntry::getModuleCode, entryQuery.getModuleCode())
+                .eq(StringUtils.hasText(entryQuery.getColumnCode()), PaleoCmsEntry::getColumnCode, entryQuery.getColumnCode())
+                .eq(StringUtils.hasText(entryQuery.getScope()), PaleoCmsEntry::getScope, entryQuery.getScope())
+                .eq(StringUtils.hasText(entryQuery.getCategory()), PaleoCmsEntry::getCategory, entryQuery.getCategory())
+                .orderByDesc(PaleoCmsEntry::getPinned)
+                .orderByAsc(PaleoCmsEntry::getSortOrder)
+                .orderByDesc(PaleoCmsEntry::getPublishTime));
+        List<PaleoCmsChannel> allChannels = channelService.list(channelQuery(new PaleoCmsChannel())
+                .eq(PaleoCmsChannel::getVisible, "1")
+                .eq(PaleoCmsChannel::getStatus, "PUBLISHED")
+                .orderByAsc(PaleoCmsChannel::getSortOrder));
+        List<PaleoCmsChannel> children = allChannels.stream()
+                .filter(item -> channel.getChannelId().equals(item.getParentId()))
+                .collect(Collectors.toList());
+        Map<String, Object> data = new HashMap<>();
+        data.put("channel", channel);
+        data.put("blocks", blocks);
+        data.put("entries", entries);
+        data.put("children", children);
         return success(data);
     }
 
@@ -221,6 +290,31 @@ public class PaleoCmsChannelController extends BaseController {
         return toAjax(blockService.updateById(block));
     }
 
+    private PaleoCmsEntry buildEntryQuery(PaleoCmsChannel channel) {
+        PaleoCmsEntry query = CmsContentFilterUtil.toEntryQuery(channel);
+        if (!StringUtils.hasText(query.getColumnCode()) && StringUtils.hasText(channel.getContentModule())) {
+            String module = channel.getContentModule();
+            if ("party".equals(module) || "pages".equals(module)) {
+                query.setColumnCode(channel.getChannelCode());
+            }
+        }
+        if ("party_topics".equals(channel.getChannelCode())) {
+            query.setColumnCode("party_topic");
+        }
+        if ("regulations".equals(channel.getChannelCode())) {
+            query.setModuleCode("pages");
+            query.setColumnCode(null);
+        }
+        if (!StringUtils.hasText(query.getScope()) && "downloads".equals(channel.getContentModule())) {
+            if ("party".equals(channel.getShellType()) || "party_downloads".equals(channel.getChannelCode())) {
+                query.setScope("party");
+            } else {
+                query.setScope("society");
+            }
+        }
+        return query;
+    }
+
     private LambdaQueryWrapper<PaleoCmsChannel> channelQuery(PaleoCmsChannel query) {
         LambdaQueryWrapper<PaleoCmsChannel> wrapper = new LambdaQueryWrapper<PaleoCmsChannel>()
                 .ne(PaleoCmsChannel::getDeleted, "1");
@@ -255,6 +349,9 @@ public class PaleoCmsChannelController extends BaseController {
         }
         if (channel.getPageType() == null) {
             channel.setPageType("CMS");
+        }
+        if (channel.getShowInAdmin() == null) {
+            channel.setShowInAdmin("1");
         }
     }
 }

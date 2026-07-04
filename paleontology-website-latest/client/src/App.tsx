@@ -1,98 +1,51 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Router, Route, Switch } from "wouter";
+import { Router, Route, Switch, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 
-// Tree-shaken at build time: when VITE_HASH_ROUTING is not set,
-// the entire hash-routing code path is dead-code eliminated.
 const USE_HASH = import.meta.env.VITE_HASH_ROUTING === "true";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { MembershipProvider } from "./contexts/MembershipContext";
+import CmsDynamicPage from "./components/cms/CmsDynamicPage";
 
-// Party Sub-system Page Imports
+/** 混合 / 定制页 — 保留独立 React 实现，不走通用版式渲染 */
 import Home from "./pages/Home";
-import Announcements from "./pages/Announcements";
-import Organizations from "./pages/Organizations";
-import Committees from "./pages/Committees";
-import Work from "./pages/Work";
-import Activities from "./pages/Activities";
-import TeamBuilding from "./pages/TeamBuilding";
-import TheoryStudy from "./pages/TheoryStudy";
-import Dynamics from "./pages/Dynamics";
-import SpecialTopics from "./pages/SpecialTopics";
-import Exemplars from "./pages/Exemplars";
 import Reporting from "./pages/Reporting";
-import Downloads from "./pages/Downloads";
-
-// Academic Services Page Import
-import Services from "./pages/Services";
 import Branches from "./pages/Branches";
-
-// Society Main Page Imports
 import SocietyHome from "./pages/SocietyHome";
 import Intro from "./pages/Intro";
-import Structure from "./pages/Structure";
-import History from "./pages/History";
-import Gallery from "./pages/Gallery";
 import SocietyAnnouncements from "./pages/SocietyAnnouncements";
-import International from "./pages/International";
-import DownloadsCenter from "./pages/DownloadsCenter";
-import Regulations from "./pages/Regulations";
 import PersonalCenter from "./pages/PersonalCenter";
-import NewsPublish from "./pages/NewsPublish";
-import PublicDownloads from "./pages/PublicDownloads";
+
+function CmsCatchAll() {
+  const [location] = useLocation();
+  return <CmsDynamicPage routePath={location} />;
+}
 
 function AppRouter() {
   const routes = (
     <Switch>
-      {/* Society Main Portal Routes */}
       <Route path="/" component={SocietyHome} />
       <Route path="/intro" component={Intro} />
-      <Route path="/structure" component={Structure} />
-      <Route path="/history" component={History} />
-      <Route path="/gallery" component={Gallery} />
-      <Route path="/society-announcements" component={SocietyAnnouncements} />
-      <Route path="/news-publish" component={NewsPublish} />
-      <Route path="/public-downloads" component={PublicDownloads} />
-      <Route path="/international" component={International} />
-      <Route path="/downloads-center" component={DownloadsCenter} />
-      <Route path="/regulations" component={Regulations} />
-
-      {/* Academic Services Route */}
-      <Route path="/services" component={Services} />
       <Route path="/branches" component={Branches} />
       <Route path="/personal-center" component={PersonalCenter} />
-
-      {/* Party Sub-system Routes */}
       <Route path="/party" component={Home} />
-      <Route path="/announcements" component={Announcements} />
-      <Route path="/organizations" component={Organizations} />
-      <Route path="/committees" component={Committees} />
-      <Route path="/work" component={Work} />
-      <Route path="/activities" component={Activities} />
-      <Route path="/team-building" component={TeamBuilding} />
-      <Route path="/theory-study" component={TheoryStudy} />
-      <Route path="/dynamics" component={Dynamics} />
-      <Route path="/special-topics" component={SpecialTopics} />
-      <Route path="/exemplars" component={Exemplars} />
       <Route path="/reporting" component={Reporting} />
-      <Route path="/downloads" component={Downloads} />
+      <Route path="/society-announcements" component={SocietyAnnouncements} />
 
-      {/* Final fallback route */}
       <Route path="/404" component={NotFound} />
-      <Route component={NotFound} />
+
+      {/* CMS catch-all：任意频道 route_path 均可访问，无需改代码 */}
+      <Route component={CmsCatchAll} />
     </Switch>
   );
 
-  // Hash routing for file:// protocol (singlefile build).
-  // USE_HASH is a compile-time constant — the unused branch is tree-shaken.
   if (USE_HASH) {
     return <Router hook={useHashLocation}>{routes}</Router>;
   }
 
-  // Default: pushState-based routing (normal build, no Router wrapper needed)
   return routes;
 }
 

@@ -18,6 +18,7 @@ import Statistics from "@/pages/admin/Statistics";
 import FinanceRecords from "@/pages/admin/FinanceRecords";
 import BranchManagement from "@/pages/admin/BranchManagement";
 import ContentManagement from "@/pages/admin/cms/ContentManagement";
+import ChannelManagement from "@/pages/admin/cms/ChannelManagement";
 import NotFound from "@/pages/admin/NotFound";
 
 function CmsIndexRedirect() {
@@ -86,6 +87,13 @@ export default function App() {
         {() => (
           <WrappedPage>
             <BranchManagement />
+          </WrappedPage>
+        )}
+      </Route>
+      <Route path="/admin/cms/channels">
+        {() => (
+          <WrappedPage>
+            <ChannelManagement />
           </WrappedPage>
         )}
       </Route>

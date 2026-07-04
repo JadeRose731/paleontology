@@ -730,7 +730,7 @@ export default function ConferenceManagement() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) setEditingConf(undefined); }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingConf ? "编辑会议" : "新建会议"}</DialogTitle>
             <DialogDescription>

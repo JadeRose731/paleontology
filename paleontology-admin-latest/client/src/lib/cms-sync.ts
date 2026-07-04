@@ -126,7 +126,9 @@ export function databaseToEntries(db: CmsDatabase): ApiCmsEntry[] {
 function defaultSiteConfig(): CmsSiteConfig {
   return {
     copyright: "© 2026 中国古生物学会 版权所有",
-    contactPhone: "", contactEmail: "", address: "",
+    contactPhone: "", contactFax: "", contactEmail: "", address: "",
+    zipCode: "", icpNumber: "", securityNumber: "",
+    qrCodeWechat: "", qrCodeMember: "",
     friendLinks: [], quickLinks: [],
   };
 }

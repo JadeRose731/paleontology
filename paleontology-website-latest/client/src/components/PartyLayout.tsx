@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useState } from "react";
 import { useMembership } from "../contexts/MembershipContext";
 import { useCmsChannels } from "@/hooks/useCmsChannels";
+import { useSiteConfig } from "@/hooks/useSiteConfig";
 import LoginJoinDialog from "./LoginJoinDialog";
 import MembershipChoiceDialog from "./MembershipChoiceDialog";
 
@@ -10,11 +11,17 @@ interface PartyLayoutProps {
   children: React.ReactNode;
   currentPageTitle: string;
   breadcrumbs?: { title: string; href?: string }[];
+  /** CMS 驱动：覆盖默认全宽判断 */
+  fullWidth?: boolean;
+  /** CMS 驱动：是否显示党建侧栏 */
+  showPartySidebar?: boolean;
+  routePath?: string;
 }
 
-export default function PartyLayout({ children, currentPageTitle, breadcrumbs }: PartyLayoutProps) {
+export default function PartyLayout({ children, currentPageTitle, breadcrumbs, fullWidth, showPartySidebar }: PartyLayoutProps) {
   const [location, setLocation] = useLocation();
   const { currentUser, isLoggedIn, logout, notifications, markNotificationRead, markAllNotificationsRead, societyMembership, userType, membershipChoiceMade } = useMembership();
+  const siteConfig = useSiteConfig();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogTab, setDialogOpenTab] = useState<"login" | "register">("login");
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -44,8 +51,8 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs }:
   ];
   const isPartyPage = partyPaths.some(path => location === path || location.startsWith(path + "/"));
 
-  // Pages that don't show the party sidebar or default breadcrumbs (landing pages/full-width)
-  const isFullWidthPage = isSocietyHome || isServicesPage || location === "/intro" || location === "/structure" || location === "/history" || location === "/gallery" || location === "/society-announcements" || location === "/news-publish" || location === "/public-downloads" || location === "/international" || location === "/downloads-center" || location === "/regulations" || location === "/personal-center";
+  const isFullWidthPage = fullWidth ?? (isSocietyHome || isServicesPage || location === "/intro" || location === "/structure" || location === "/history" || location === "/gallery" || location === "/society-announcements" || location === "/news-publish" || location === "/public-downloads" || location === "/international" || location === "/downloads-center" || location === "/regulations" || location === "/personal-center");
+  const showPartySidebarLayout = showPartySidebar ?? (isPartyPage && !isFullWidthPage);
 
   const { mainNavLinks, partyNavItems: navItems } = useCmsChannels();
 
@@ -295,35 +302,7 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs }:
 
       {/* Container - Flexible grid based on Page */}
       <div className={`${isSocietyHome ? "w-full" : "max-w-7xl w-full mx-auto px-4 lg:px-8 py-8"} flex-grow flex flex-col gap-6`}>
-        {isFullWidthPage ? (
-          /* Full Width Landing Page or Services Layout */
-          <div className="w-full flex-grow flex flex-col">
-      {/* Breadcrumbs for Non-Home Pages */}
-              {!isSocietyHome && (
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-white px-4 py-2 border border-fossil-stone rounded shadow-sm mx-4 lg:mx-8 mb-6">
-                <span className="material-symbols-outlined text-[16px]">home</span>
-                <Link href="/">
-                  <span className="hover:text-primary transition-colors cursor-pointer">首页</span>
-                </Link>
-                {location !== "/personal-center" && (
-                  <>
-                    <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-                    <span className="text-party-red font-semibold">{currentPageTitle}</span>
-                  </>
-                )}
-                {location === "/personal-center" && (
-                  <>
-                    <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-                    <span className="text-party-red font-semibold">个人中心</span>
-                  </>
-                )}
-              </div>
-            )}
-            <div className="w-full flex-grow">
-              {children}
-            </div>
-          </div>
-        ) : (
+        {showPartySidebarLayout ? (
           /* Two Column Subpage Layout (Party Culture subpages) */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full flex-grow">
             {/* Side Navigation */}
@@ -398,50 +377,89 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs }:
               </div>
             </div>
           </div>
+        ) : (
+          <div className="w-full flex-grow flex flex-col">
+            {!isSocietyHome && (
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-white px-4 py-2 border border-fossil-stone rounded shadow-sm mx-4 lg:mx-8 mb-6">
+                <span className="material-symbols-outlined text-[16px]">home</span>
+                <Link href="/">
+                  <span className="hover:text-primary transition-colors cursor-pointer">首页</span>
+                </Link>
+                {location !== "/personal-center" && (
+                  <>
+                    <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                    <span className="text-party-red font-semibold">{currentPageTitle}</span>
+                  </>
+                )}
+                {location === "/personal-center" && (
+                  <>
+                    <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                    <span className="text-party-red font-semibold">个人中心</span>
+                  </>
+                )}
+              </div>
+            )}
+            <div className="w-full flex-grow">
+              {children}
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Footer - Perfectly matching Image 4 and pasted_content_2.txt (lines 381-425) */}
+      {/* Footer */}
       <footer className="w-full bg-strata-blue-deep dark:bg-ink-dark border-t-4 border-tertiary text-white pt-10 pb-6">
         <div className="w-full max-w-7xl mx-auto px-4 lg:px-8 grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-8">
           {/* Brand & Contact */}
           <div className="col-span-1 md:col-span-1 lg:col-span-2">
             <div className="space-y-4 opacity-80 font-body-sm text-sm">
-              <p className="flex items-start gap-3">
-                <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>location_on</span>
-                南京市北京东路39号
-              </p>
-              <p className="flex items-start gap-3">
-                <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>mail_outline</span>
-                邮编: 210008
-              </p>
-              <p className="flex items-start gap-3">
-                <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>phone</span>
-                电话: 025-83282138
-              </p>
-              <p className="flex items-start gap-3">
-                <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>fax</span>
-                传真: 025-83357026
-              </p>
-              <p className="flex items-start gap-3">
-                <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>mail</span>
-                邮箱: psc@nigpas.ac.cn
-              </p>
+              {siteConfig.address && (
+                <p className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>location_on</span>
+                  {siteConfig.address}
+                </p>
+              )}
+              {siteConfig.zipCode && (
+                <p className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>mail_outline</span>
+                  邮编: {siteConfig.zipCode}
+                </p>
+              )}
+              {siteConfig.contactPhone && (
+                <p className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>phone</span>
+                  电话: {siteConfig.contactPhone}
+                </p>
+              )}
+              {siteConfig.contactFax && (
+                <p className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>fax</span>
+                  传真: {siteConfig.contactFax}
+                </p>
+              )}
+              {siteConfig.contactEmail && (
+                <p className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-tertiary-fixed" style={{ color: '#f5e0ba' }}>mail</span>
+                  邮箱: {siteConfig.contactEmail}
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Related Societies */}
-          <div>
-            <h3 className="text-sm font-bold tracking-wider uppercase mb-4 border-b border-white/10 pb-2" style={{ color: '#f5e0ba' }}>
-              相关学会
-            </h3>
-            <ul className="space-y-2 text-xs opacity-80">
-              <li className="hover:text-tertiary-fixed transition-colors cursor-pointer">中国地理学会</li>
-              <li className="hover:text-tertiary-fixed transition-colors cursor-pointer">中国地质学会</li>
-              <li className="hover:text-tertiary-fixed transition-colors cursor-pointer">国际古生物协会 (IPA)</li>
-              <li className="hover:text-tertiary-fixed transition-colors cursor-pointer">亚洲古生物学会</li>
-            </ul>
-          </div>
+          {/* Related Societies / Friend Links */}
+          {siteConfig.friendLinks.length > 0 && (
+            <div>
+              <h3 className="text-sm font-bold tracking-wider uppercase mb-4 border-b border-white/10 pb-2" style={{ color: '#f5e0ba' }}>
+                相关学会
+              </h3>
+              <ul className="space-y-2 text-xs opacity-80">
+                {siteConfig.friendLinks.map((link, idx) => (
+                  <li key={idx} className="hover:text-tertiary-fixed transition-colors cursor-pointer">
+                    {link.url ? <a href={link.url} target="_blank" rel="noopener noreferrer">{link.name}</a> : link.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* QR Codes */}
           <div>
@@ -450,14 +468,20 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs }:
             </h3>
             <div className="flex gap-4">
               <div className="flex flex-col items-center gap-1">
-                <div className="w-20 h-20 bg-white rounded p-1 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-primary text-4xl">qr_code_2</span>
+                <div className="w-20 h-20 bg-white rounded p-1 flex items-center justify-center overflow-hidden">
+                  {siteConfig.qrCodeWechat
+                    ? <img src={siteConfig.qrCodeWechat} alt="官方微信" className="w-full h-full object-contain" />
+                    : <span className="material-symbols-outlined text-primary text-4xl">qr_code_2</span>
+                  }
                 </div>
                 <span className="text-[10px] opacity-70">官方微信</span>
               </div>
               <div className="flex flex-col items-center gap-1">
-                <div className="w-20 h-20 bg-white rounded p-1 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-primary text-4xl">qr_code_2</span>
+                <div className="w-20 h-20 bg-white rounded p-1 flex items-center justify-center overflow-hidden">
+                  {siteConfig.qrCodeMember
+                    ? <img src={siteConfig.qrCodeMember} alt="会员系统" className="w-full h-full object-contain" />
+                    : <span className="material-symbols-outlined text-primary text-4xl">qr_code_2</span>
+                  }
                 </div>
                 <span className="text-[10px] opacity-70">会员系统</span>
               </div>
@@ -467,11 +491,11 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs }:
 
         {/* Copyright */}
         <div className="w-full max-w-7xl mx-auto px-4 lg:px-8 mt-8 pt-6 border-t border-white/10 text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-4 text-xs opacity-60">
-          <span>© 2026 中国古生物学会 版权所有. All Rights Reserved.</span>
+          <span>{siteConfig.copyright}</span>
           <div className="flex gap-4">
-            <span className="hover:underline cursor-pointer">苏ICP备16036686号-1</span>
-            <span>|</span>
-            <span className="hover:underline cursor-pointer">苏公网安备 32010202010139号</span>
+            {siteConfig.icpNumber && <span className="hover:underline cursor-pointer">{siteConfig.icpNumber}</span>}
+            {siteConfig.icpNumber && siteConfig.securityNumber && <span>|</span>}
+            {siteConfig.securityNumber && <span className="hover:underline cursor-pointer">{siteConfig.securityNumber}</span>}
           </div>
         </div>
       </footer>

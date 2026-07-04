@@ -1,5 +1,7 @@
 /** 用户端 CMS 公开 API — 对接 paleontology-cms-backend */
 
+import type { CmsBlock, CmsPageResolveData } from "@/lib/cms-types";
+
 export interface ApiCmsEntry {
   entryId?: number;
   moduleCode: string;
@@ -14,6 +16,8 @@ export interface ApiCmsEntry {
   fileUrl?: string | null;
   linkUrl?: string | null;
   extraJson?: string | null;
+  fileExtension?: string | null;
+  fileSize?: number | null;
   pinned?: string;
   sortOrder?: number;
   publishTime?: string | null;
@@ -32,10 +36,14 @@ export interface ApiCmsChannel {
   title?: string;
   subtitle?: string;
   kicker?: string;
-  layoutType?: string;
-  contentModule?: string;
+  breadcrumbName?: string;
+  layoutType?: string | null;
+  layoutParams?: string | null;
+  contentModule?: string | null;
+  contentFilter?: string | null;
   pageType?: string;
-  shellType?: string;
+  shellType?: string | null;
+  status?: string;
 }
 
 interface ApiResponse<T = unknown> {
@@ -71,9 +79,22 @@ export async function getPublicChannel(params: { routePath?: string; channelCode
   const qs = new URLSearchParams();
   if (params.routePath) qs.set("routePath", params.routePath);
   if (params.channelCode) qs.set("channelCode", params.channelCode);
-  return get<{ channel: ApiCmsChannel; blocks: Array<{ blockType?: string; title?: string; bodyContent?: string }> }>(
+  return get<{ channel: ApiCmsChannel; blocks: CmsBlock[] }>(
     `/paleo/cms-channels/public/detail?${qs}`
   );
+}
+
+/** 公开：页面一站式解析（栏目 + 区块 + 内容） */
+export async function resolvePublicPage(params: { routePath?: string; channelCode?: string }): Promise<CmsPageResolveData> {
+  const qs = new URLSearchParams();
+  if (params.routePath) qs.set("routePath", params.routePath);
+  if (params.channelCode) qs.set("channelCode", params.channelCode);
+  return get<CmsPageResolveData>(`/paleo/cms-channels/public/resolve?${qs}`);
+}
+
+export function parseLayoutParams<T extends Record<string, unknown>>(json?: string | null, fallback?: T): T {
+  if (!json) return (fallback ?? {}) as T;
+  try { return JSON.parse(json) as T; } catch { return (fallback ?? {}) as T; }
 }
 
 export function parseExtra<T>(json?: string | null, fallback?: T): T {

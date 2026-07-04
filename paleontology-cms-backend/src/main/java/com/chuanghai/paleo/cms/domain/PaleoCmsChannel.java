@@ -20,6 +20,10 @@ public class PaleoCmsChannel {
     private String navName;
     private Integer sortOrder;
     private String visible;
+    private String showInAdmin;
+    private String adminSection;
+    private String navIcon;
+    private String adminRoles;
     private String title;
     private String subtitle;
     private String kicker;

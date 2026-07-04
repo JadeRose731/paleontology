@@ -1,7 +1,15 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
+import { listCmsChannelTree } from "@/lib/cms-api";
+import {
+  buildCmsMenuFromTree,
+  buildCmsRoutePermissions,
+  FALLBACK_BRANCH_CMS_MENU,
+  FALLBACK_CMS_MENU,
+  resolveAdminSection,
+} from "@/lib/cms-channel-nav";
 import {
   type MembershipStatus,
   type ConferenceStatus,
@@ -386,6 +394,8 @@ interface AdminContextType {
   canAccess(path: string): boolean;
   getAllowedMenuItems(): MenuItem[];
   getDefaultCmsPath(): string;
+  refreshCmsMenu(): Promise<void>;
+  cmsMenuLoaded: boolean;
   pendingVoucherReviews: ReviewItem[];
   pendingInvoiceReviews: ReviewItem[];
   approveVoucher(targetEmail: string, type: "society_fee" | "conference_fee", confId?: string): void;
@@ -568,6 +578,7 @@ const ROUTE_PERMISSIONS: Record<string, AdminRole[]> = {
   "/admin/cms/branch": ["branch_admin"],
   "/admin/cms/publish": ["super_admin"],
   "/admin/cms/public-files": ["super_admin", "branch_admin"],
+  "/admin/cms/channels": ["super_admin"],
 };
 
 /** 分会管理员 CMS 菜单 — 仅本分站栏目，不含总学会首页/简介等 */
@@ -612,15 +623,7 @@ const ALL_MENU_ITEMS: MenuItem[] = [
           { path: "/admin/cms/news", label: "新闻动态", icon: "Newspaper" },
         ],
       },
-      {
-        path: "/admin/cms-group/intro",
-        label: "学会简介",
-        icon: "FileText",
-        children: [
-          { path: "/admin/cms/pages", label: "页面内容", icon: "Layout" },
-          { path: "/admin/cms/awards", label: "获奖成果", icon: "Award" },
-        ],
-      },
+      { path: "/admin/cms/pages", label: "学会简介", icon: "FileText" },
       {
         path: "/admin/cms-group/structure",
         label: "组织机构",
@@ -1933,6 +1936,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [cmsMenuChildren, setCmsMenuChildren] = useState<MenuItem[] | null>(null);
+  const [cmsRoutePermissions, setCmsRoutePermissions] = useState<Record<string, AdminRole[]>>({});
+  const [cmsMenuLoaded, setCmsMenuLoaded] = useState(false);
+  const adminRoleRef = useRef<AdminRole>("super_admin");
 
   const triggerRefresh = useCallback(() => setRefreshTrigger(t => t + 1), []);
 
@@ -1996,14 +2003,46 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const adminRole: AdminRole = adminUser?.role || "super_admin";
   const adminBranchId: string | null = adminUser?.branchId || null;
+  adminRoleRef.current = adminRole;
+
+  const refreshCmsMenu = useCallback(async () => {
+    if (!adminUser) {
+      setCmsMenuChildren(null);
+      setCmsRoutePermissions({});
+      setCmsMenuLoaded(false);
+      return;
+    }
+    try {
+      const tree = await listCmsChannelTree();
+      const menu = buildCmsMenuFromTree(tree, adminRoleRef.current);
+      setCmsMenuChildren(menu);
+      setCmsRoutePermissions(buildCmsRoutePermissions(tree));
+    } catch {
+      setCmsMenuChildren(
+        adminRoleRef.current === "branch_admin" ? FALLBACK_BRANCH_CMS_MENU : FALLBACK_CMS_MENU
+      );
+      setCmsRoutePermissions(ROUTE_PERMISSIONS);
+    } finally {
+      setCmsMenuLoaded(true);
+    }
+  }, [adminUser]);
+
+  useEffect(() => {
+    refreshCmsMenu();
+  }, [refreshCmsMenu, adminRole]);
+
+  const mergedRoutePermissions = useMemo(
+    () => ({ ...ROUTE_PERMISSIONS, ...cmsRoutePermissions }),
+    [cmsRoutePermissions]
+  );
 
   const canAccess = useCallback(
     (path: string): boolean => {
-      const allowed = ROUTE_PERMISSIONS[path];
+      const allowed = mergedRoutePermissions[path];
       if (!allowed) return false;
       return allowed.includes(adminRole);
     },
-    [adminRole]
+    [adminRole, mergedRoutePermissions]
   );
 
   const filterMenuTree = useCallback(
@@ -2015,28 +2054,44 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             if (allowedChildren.length === 0) return null;
             return { ...item, children: allowedChildren };
           }
-          const allowed = ROUTE_PERMISSIONS[item.path];
+          const allowed = mergedRoutePermissions[item.path];
           if (!allowed || !allowed.includes(adminRole)) return null;
           return item;
         })
         .filter((item): item is MenuItem => item !== null);
     },
-    [adminRole]
+    [adminRole, mergedRoutePermissions]
   );
 
   const getAllowedMenuItems = useCallback((): MenuItem[] => {
-    const filtered = filterMenuTree(ALL_MENU_ITEMS);
-    if (adminRole !== "branch_admin") return filtered;
-    return filtered.map(item =>
+    const cmsChildren = cmsMenuChildren ?? (
+      adminRole === "branch_admin" ? FALLBACK_BRANCH_CMS_MENU : FALLBACK_CMS_MENU
+    );
+    const baseItems = ALL_MENU_ITEMS.map(item =>
       item.path === "/admin/cms" && item.children
-        ? { ...item, children: BRANCH_CMS_MENU_ITEMS }
+        ? { ...item, children: cmsChildren }
         : item
     );
-  }, [filterMenuTree, adminRole]);
+    return filterMenuTree(baseItems);
+  }, [filterMenuTree, adminRole, cmsMenuChildren]);
 
   const getDefaultCmsPath = useCallback((): string => {
-    return adminRole === "branch_admin" ? "/admin/cms/branch" : "/admin/cms/banners";
-  }, [adminRole]);
+    const cmsChildren = cmsMenuChildren ?? (
+      adminRole === "branch_admin" ? FALLBACK_BRANCH_CMS_MENU : FALLBACK_CMS_MENU
+    );
+    const findFirstLeaf = (items: MenuItem[]): string | null => {
+      for (const item of items) {
+        if (item.children?.length) {
+          const leaf = findFirstLeaf(item.children);
+          if (leaf) return leaf;
+        } else if (item.path.startsWith("/admin/cms/") && !item.path.includes("cms-group")) {
+          return item.path;
+        }
+      }
+      return null;
+    };
+    return findFirstLeaf(cmsChildren) ?? (adminRole === "branch_admin" ? "/admin/cms/branch" : "/admin/cms/banners");
+  }, [adminRole, cmsMenuChildren]);
 
   // ==========================================
   // NOTIFICATIONS
@@ -3487,6 +3542,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     canAccess,
     getAllowedMenuItems,
     getDefaultCmsPath,
+    refreshCmsMenu,
+    cmsMenuLoaded,
     pendingVoucherReviews,
     pendingInvoiceReviews,
     approveVoucher,

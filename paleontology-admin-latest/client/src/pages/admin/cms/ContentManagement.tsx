@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Plus, Edit, Trash2, Info } from "lucide-react";
@@ -114,7 +115,7 @@ export default function ContentManagement() {
   }, [db.partyArticles, partyColumnFilter]);
 
   const regulationPages = useMemo(
-    () => scoped.pages.filter(p => !p.branchId && (p.code.includes("regulation") || p.code.includes("charter"))),
+    () => scoped.pages.filter(p => !p.branchId && !p.code.startsWith("intro_") && (p.code.includes("regulation") || p.code.includes("charter"))),
     [scoped.pages]
   );
 
@@ -310,33 +311,66 @@ export default function ContentManagement() {
         </div>
       )}
 
-      {section === "pages" && (
-          <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <div><CardTitle className="text-base">页面列表</CardTitle><CardDescription>学会概况、章程及党建相关富文本页</CardDescription></div>
-              <Button size="sm" onClick={() => setEditPage({ id: generateCmsId("page"), code: "", title: "", content: "<p></p>", status: "draft", branchId: isBranchScope ? adminBranchId! : null, updatedAt: new Date().toISOString().split("T")[0], pageType: isBranchScope ? "branch" : "richtext" })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增</Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>编码</TableHead><TableHead>类型</TableHead><TableHead>归属</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {scoped.pages.map(p => (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-medium">{p.title}</TableCell>
-                      <TableCell className="text-xs font-mono">{p.code}</TableCell>
-                      <TableCell className="text-xs">{p.pageType === "party" ? "党建" : p.pageType === "branch" ? "分会" : "学会"}</TableCell>
-                      <TableCell>{scopeLabel(p.branchId)}</TableCell>
-                      <TableCell><Badge variant="outline" className={statusBadgeClass(p.status)}>{CMS_STATUS_LABELS[p.status]}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditPage({ ...p })}><Edit className="h-3.5 w-3.5" /></Button>
-                        <DeleteButton title={p.title} onConfirm={() => { persist({ ...db, pages: db.pages.filter(x => x.id !== p.id) }); toast.success("已删除"); }} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+      {(section === "pages" || section === "awards") && (
+        <Tabs defaultValue={section === "awards" ? "awards" : "pages"} className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="pages">页面内容</TabsTrigger>
+            <TabsTrigger value="awards">获奖成果</TabsTrigger>
+          </TabsList>
+          <TabsContent value="pages">
+            <Card>
+              <CardHeader className="flex flex-row justify-between">
+                <div><CardTitle className="text-base">页面列表</CardTitle><CardDescription>学会简介相关富文本页面（学会背景、宗旨与任务、学科贡献等）</CardDescription></div>
+                <Button size="sm" onClick={() => setEditPage({ id: generateCmsId("page"), code: "", title: "", content: "<p></p>", status: "draft", branchId: isBranchScope ? adminBranchId! : null, updatedAt: new Date().toISOString().split("T")[0], pageType: isBranchScope ? "branch" : "richtext" })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增</Button>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>归属</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {scoped.pages.filter(p => p.code.startsWith("intro_")).map(p => (
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium">{p.title}</TableCell>
+                        <TableCell>{scopeLabel(p.branchId)}</TableCell>
+                        <TableCell><Badge variant="outline" className={statusBadgeClass(p.status)}>{CMS_STATUS_LABELS[p.status]}</Badge></TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => setEditPage({ ...p })}><Edit className="h-3.5 w-3.5" /></Button>
+                          <DeleteButton title={p.title} onConfirm={() => { persist({ ...db, pages: db.pages.filter(x => x.id !== p.id) }); toast.success("已删除"); }} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="awards">
+            <Card>
+              <CardHeader className="flex flex-row justify-between">
+                <div><CardTitle className="text-base">获奖记录</CardTitle><CardDescription>管理学会各类获奖成果</CardDescription></div>
+                <Button size="sm" onClick={() => setEditAward({ id: generateCmsId("award"), year: new Date().getFullYear().toString(), awardName: "", winner: "", description: "", branchId: isBranchScope ? adminBranchId! : null })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增</Button>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader><TableRow><TableHead>年份</TableHead><TableHead>奖项</TableHead><TableHead>获奖人</TableHead><TableHead>归属</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {scoped.awards.map(a => (
+                      <TableRow key={a.id}>
+                        <TableCell>{a.year}</TableCell>
+                        <TableCell className="font-medium">{a.awardName}</TableCell>
+                        <TableCell>{a.winner}</TableCell>
+                        <TableCell>{scopeLabel(a.branchId)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => setEditAward({ ...a })}><Edit className="h-3.5 w-3.5" /></Button>
+                          <DeleteButton title={a.awardName} onConfirm={() => { persist({ ...db, awards: db.awards.filter(x => x.id !== a.id) }); toast.success("已删除"); }} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       )}
 
       {section === "personnel" && (
@@ -393,33 +427,6 @@ export default function ContentManagement() {
           </Card>
       )}
 
-      {section === "awards" && (
-          <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <div><CardTitle className="text-base">获奖记录</CardTitle></div>
-              <Button size="sm" onClick={() => setEditAward({ id: generateCmsId("award"), year: new Date().getFullYear().toString(), awardName: "", winner: "", description: "", branchId: isBranchScope ? adminBranchId! : null })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增</Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader><TableRow><TableHead>年份</TableHead><TableHead>奖项</TableHead><TableHead>获奖人</TableHead><TableHead>归属</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {scoped.awards.map(a => (
-                    <TableRow key={a.id}>
-                      <TableCell>{a.year}</TableCell>
-                      <TableCell className="font-medium">{a.awardName}</TableCell>
-                      <TableCell>{a.winner}</TableCell>
-                      <TableCell>{scopeLabel(a.branchId)}</TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditAward({ ...a })}><Edit className="h-3.5 w-3.5" /></Button>
-                        <DeleteButton title={a.awardName} onConfirm={() => { persist({ ...db, awards: db.awards.filter(x => x.id !== a.id) }); toast.success("已删除"); }} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-      )}
 
       {section === "science" && (
           <Card>
@@ -618,41 +625,62 @@ export default function ContentManagement() {
           ) : (
             <div className="space-y-4">
               <Card>
-                <CardHeader><CardTitle className="text-base">底部信息</CardTitle></CardHeader>
-                <CardContent className="space-y-4 max-w-xl">
-                  {(["copyright", "contactPhone", "contactEmail", "address"] as const).map(key => (
-                    <div key={key} className="space-y-2">
-                      <Label>{key === "copyright" ? "版权" : key === "contactPhone" ? "电话" : key === "contactEmail" ? "邮箱" : "地址"}</Label>
-                      <Input value={db.siteConfig[key]} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, [key]: e.target.value } })} />
-                    </div>
-                  ))}
-                  <Label>友情链接</Label>
-                  {db.siteConfig.friendLinks.map((link, idx) => (
-                    <div key={idx} className="flex gap-2">
-                      <Input value={link.name} onChange={e => { const friendLinks = [...db.siteConfig.friendLinks]; friendLinks[idx] = { ...link, name: e.target.value }; persist({ ...db, siteConfig: { ...db.siteConfig, friendLinks } }); }} />
-                      <Input value={link.url} onChange={e => { const friendLinks = [...db.siteConfig.friendLinks]; friendLinks[idx] = { ...link, url: e.target.value }; persist({ ...db, siteConfig: { ...db.siteConfig, friendLinks } }); }} />
-                    </div>
-                  ))}
+                <CardHeader><CardTitle className="text-base">底部联系信息</CardTitle><CardDescription>配置网站底部（footer）显示的联系方式</CardDescription></CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2"><Label>版权声明</Label><Input value={db.siteConfig.copyright} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, copyright: e.target.value } })} /></div>
+                    <div className="space-y-2"><Label>地址</Label><Input value={db.siteConfig.address} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, address: e.target.value } })} /></div>
+                    <div className="space-y-2"><Label>邮编</Label><Input value={db.siteConfig.zipCode} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, zipCode: e.target.value } })} /></div>
+                    <div className="space-y-2"><Label>电话</Label><Input value={db.siteConfig.contactPhone} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, contactPhone: e.target.value } })} /></div>
+                    <div className="space-y-2"><Label>传真</Label><Input value={db.siteConfig.contactFax} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, contactFax: e.target.value } })} /></div>
+                    <div className="space-y-2"><Label>邮箱</Label><Input value={db.siteConfig.contactEmail} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, contactEmail: e.target.value } })} /></div>
+                    <div className="space-y-2"><Label>ICP备案号</Label><Input value={db.siteConfig.icpNumber} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, icpNumber: e.target.value } })} /></div>
+                    <div className="space-y-2"><Label>公安网安备号</Label><Input value={db.siteConfig.securityNumber} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, securityNumber: e.target.value } })} /></div>
+                  </div>
                 </CardContent>
               </Card>
+
               <Card>
-                <CardHeader><CardTitle className="text-base">首页快捷入口</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base">二维码配置</CardTitle><CardDescription>底部"关注我们"区域显示的二维码图片地址</CardDescription></CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>官方微信二维码（图片URL）</Label>
+                      <Input placeholder="https://..." value={db.siteConfig.qrCodeWechat} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, qrCodeWechat: e.target.value } })} />
+                      {db.siteConfig.qrCodeWechat && <img src={db.siteConfig.qrCodeWechat} alt="微信" className="w-20 h-20 object-contain border rounded" />}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>会员系统二维码（图片URL）</Label>
+                      <Input placeholder="https://..." value={db.siteConfig.qrCodeMember} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, qrCodeMember: e.target.value } })} />
+                      {db.siteConfig.qrCodeMember && <img src={db.siteConfig.qrCodeMember} alt="会员" className="w-20 h-20 object-contain border rounded" />}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="flex flex-row justify-between">
+                  <div><CardTitle className="text-base">相关学会 / 友情链接</CardTitle><CardDescription>底部"相关学会"列表</CardDescription></div>
+                  <Button size="sm" onClick={() => persist({ ...db, siteConfig: { ...db.siteConfig, friendLinks: [...db.siteConfig.friendLinks, { name: "", url: "" }] } })}><Plus className="h-3.5 w-3.5 mr-1" /> 添加</Button>
+                </CardHeader>
                 <CardContent>
                   <Table>
-                    <TableHeader><TableRow><TableHead>标签</TableHead><TableHead>路径</TableHead><TableHead>启用</TableHead></TableRow></TableHeader>
+                    <TableHeader><TableRow><TableHead>名称</TableHead><TableHead>链接地址</TableHead><TableHead className="text-right w-20">操作</TableHead></TableRow></TableHeader>
                     <TableBody>
-                      {db.siteConfig.quickLinks.sort((a, b) => a.sort - b.sort).map(ql => (
-                        <TableRow key={ql.id}>
-                          <TableCell><Input className="h-8" value={ql.label} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, quickLinks: db.siteConfig.quickLinks.map(x => x.id === ql.id ? { ...x, label: e.target.value } : x) } })} /></TableCell>
-                          <TableCell><Input className="h-8" value={ql.path} onChange={e => persist({ ...db, siteConfig: { ...db.siteConfig, quickLinks: db.siteConfig.quickLinks.map(x => x.id === ql.id ? { ...x, path: e.target.value } : x) } })} /></TableCell>
-                          <TableCell><Checkbox checked={ql.enabled} onCheckedChange={v => persist({ ...db, siteConfig: { ...db.siteConfig, quickLinks: db.siteConfig.quickLinks.map(x => x.id === ql.id ? { ...x, enabled: !!v } : x) } })} /></TableCell>
+                      {db.siteConfig.friendLinks.map((link, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell><Input className="h-8" value={link.name} placeholder="学会名称" onChange={e => { const friendLinks = [...db.siteConfig.friendLinks]; friendLinks[idx] = { ...link, name: e.target.value }; persist({ ...db, siteConfig: { ...db.siteConfig, friendLinks } }); }} /></TableCell>
+                          <TableCell><Input className="h-8" value={link.url} placeholder="https://..." onChange={e => { const friendLinks = [...db.siteConfig.friendLinks]; friendLinks[idx] = { ...link, url: e.target.value }; persist({ ...db, siteConfig: { ...db.siteConfig, friendLinks } }); }} /></TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm" className="text-red-600 h-7 w-7 p-0" onClick={() => { const friendLinks = db.siteConfig.friendLinks.filter((_, i) => i !== idx); persist({ ...db, siteConfig: { ...db.siteConfig, friendLinks } }); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
-                  <Button className="mt-4" onClick={() => toast.success("站点配置已保存")}>保存全部配置</Button>
                 </CardContent>
               </Card>
+
             </div>
           )
       )}
@@ -852,7 +880,7 @@ export default function ContentManagement() {
 
       {/* ── 公开文件编辑弹窗 ── */}
       <Dialog open={!!editPublicFile} onOpenChange={o => !o && setEditPublicFile(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editPublicFile?.id && db.publicFiles.some(f => f.id === editPublicFile.id) ? "编辑文件信息" : "上传文件"}</DialogTitle>
           </DialogHeader>
@@ -1051,7 +1079,7 @@ export default function ContentManagement() {
 
       {/* ── 新闻发布编辑弹窗 ── */}
       <Dialog open={!!editPublish} onOpenChange={o => !o && setEditPublish(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editPublish?.id && db.publishArticles.some(a => a.id === editPublish.id) ? "编辑内容" : "新建内容"}</DialogTitle></DialogHeader>
           {editPublish && (
             <div className="space-y-3">
@@ -1167,7 +1195,7 @@ export default function ContentManagement() {
 
       {/* Article dialog */}
       <Dialog open={!!editArticle} onOpenChange={o => !o && setEditArticle(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle>编辑内容</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>编辑内容</DialogTitle></DialogHeader>
           {editArticle?.item && (<div className="space-y-3">
             <div className="space-y-2"><Label>标题</Label><Input value={editArticle.item.title} onChange={e => setEditArticle({ ...editArticle, item: { ...editArticle.item!, title: e.target.value } })} /></div>
             <div className="grid grid-cols-2 gap-3">
@@ -1189,15 +1217,15 @@ export default function ContentManagement() {
 
       {/* Page dialog */}
       <Dialog open={!!editPage} onOpenChange={o => !o && setEditPage(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle>编辑页面</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>编辑页面</DialogTitle></DialogHeader>
           {editPage && (<div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2"><Label>标题</Label><Input value={editPage.title} onChange={e => setEditPage({ ...editPage, title: e.target.value })} /></div>
-              <div className="space-y-2"><Label>编码</Label><Input value={editPage.code} onChange={e => setEditPage({ ...editPage, code: e.target.value })} /></div>
-            </div>
+            <div className="space-y-2"><Label>标题</Label><Input value={editPage.title} onChange={e => setEditPage({ ...editPage, title: e.target.value })} /></div>
+            {editPage.code && db.pages.some(p => p.id === editPage.id) && (
+              <div className="text-xs text-muted-foreground">系统编码：<code className="bg-muted px-1 py-0.5 rounded">{editPage.code}</code></div>
+            )}
             <RichTextEditor value={editPage.content} onChange={c => setEditPage({ ...editPage, content: c })} />
           </div>)}
-          <DialogFooter><Button variant="outline" onClick={() => setEditPage(null)}>取消</Button><Button onClick={() => { if (!editPage) return; const page = { ...editPage, updatedAt: new Date().toISOString().split("T")[0], status: "published" as const }; persist({ ...db, pages: db.pages.some(p => p.id === page.id) ? db.pages.map(p => p.id === page.id ? page : p) : [...db.pages, page] }); setEditPage(null); toast.success("已发布"); }}>保存并发布</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setEditPage(null)}>取消</Button><Button onClick={() => { if (!editPage) return; const code = editPage.code || `intro_${editPage.title.replace(/\s+/g, "_").toLowerCase() || Date.now()}`; const page = { ...editPage, code, updatedAt: new Date().toISOString().split("T")[0], status: "published" as const }; persist({ ...db, pages: db.pages.some(p => p.id === page.id) ? db.pages.map(p => p.id === page.id ? page : p) : [...db.pages, page] }); setEditPage(null); toast.success("已发布"); }}>保存并发布</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1247,7 +1275,7 @@ export default function ContentManagement() {
 
       {/* Science dialog */}
       <Dialog open={!!editScience} onOpenChange={o => !o && setEditScience(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">{editScience && (<><DialogHeader><DialogTitle>科学传播</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">{editScience && (<><DialogHeader><DialogTitle>科学传播</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Input value={editScience.title} onChange={e => setEditScience({ ...editScience, title: e.target.value })} placeholder="标题" />
             <Select value={editScience.format} onValueChange={v => setEditScience({ ...editScience, format: v as CmsScienceItem["format"] })}>
@@ -1264,7 +1292,7 @@ export default function ContentManagement() {
 
       {/* Intl dialog */}
       <Dialog open={!!editIntl} onOpenChange={o => !o && setEditIntl(null)}>
-        <DialogContent className="max-w-2xl">{editIntl && (<><DialogHeader><DialogTitle>国际交流</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">{editIntl && (<><DialogHeader><DialogTitle>国际交流</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Input value={editIntl.title} onChange={e => setEditIntl({ ...editIntl, title: e.target.value })} />
             <Select value={editIntl.type} onValueChange={v => setEditIntl({ ...editIntl, type: v as CmsInternationalItem["type"] })}>
@@ -1280,7 +1308,7 @@ export default function ContentManagement() {
 
       {/* Tech dialog */}
       <Dialog open={!!editTech} onOpenChange={o => !o && setEditTech(null)}>
-        <DialogContent className="max-w-2xl">{editTech && (<><DialogHeader><DialogTitle>科技奖励</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">{editTech && (<><DialogHeader><DialogTitle>科技奖励</DialogTitle></DialogHeader>
           <Input value={editTech.title} onChange={e => setEditTech({ ...editTech, title: e.target.value })} className="mb-3" />
           <RichTextEditor value={editTech.content} onChange={c => setEditTech({ ...editTech, content: c })} />
           <DialogFooter className="mt-4"><Button onClick={() => { const item = { ...editTech, status: "published" as const, updatedAt: new Date().toISOString().split("T")[0] }; persist({ ...db, techRewardItems: db.techRewardItems.some(t => t.id === item.id) ? db.techRewardItems.map(t => t.id === item.id ? item : t) : [...db.techRewardItems, item] }); setEditTech(null); toast.success("已发布"); }}>发布</Button></DialogFooter></>)}
@@ -1289,7 +1317,7 @@ export default function ContentManagement() {
 
       {/* Party dialog */}
       <Dialog open={!!editParty} onOpenChange={o => !o && setEditParty(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">{editParty && (<><DialogHeader><DialogTitle>党建文章</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">{editParty && (<><DialogHeader><DialogTitle>党建文章</DialogTitle></DialogHeader>
           <Select value={editParty.column} onValueChange={v => setEditParty({ ...editParty, column: v })}>
             <SelectTrigger className="mb-3"><SelectValue /></SelectTrigger><SelectContent>{PARTY_NAV_ITEMS.filter(c => c.code !== "party_topics" && c.code !== "party_downloads").map(c => <SelectItem key={c.code} value={c.code}>{c.title}</SelectItem>)}</SelectContent>
           </Select>
@@ -1336,7 +1364,7 @@ export default function ContentManagement() {
 
       {/* Preview */}
       <Dialog open={!!previewArticle} onOpenChange={o => !o && setPreviewArticle(null)}>
-        <DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>预览</DialogTitle><DialogDescription>{previewArticle?.title}</DialogDescription></DialogHeader>
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>预览</DialogTitle><DialogDescription>{previewArticle?.title}</DialogDescription></DialogHeader>
           {previewArticle && (<div className="border rounded-md p-4 prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: previewArticle.content }} />)}
         </DialogContent>
       </Dialog>

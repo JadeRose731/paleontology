@@ -1,0 +1,42 @@
+-- 版式注册表：驱动后台可视化编排与用户端 layout_type 映射
+CREATE TABLE IF NOT EXISTS paleo_cms_layout (
+    layout_code   VARCHAR(64)  NOT NULL COMMENT '版式编码',
+    layout_name   VARCHAR(128) NOT NULL COMMENT '版式名称',
+    description   VARCHAR(500) DEFAULT NULL COMMENT '说明',
+    schema_json   TEXT         NULL COMMENT 'layout_params 表单 Schema JSON',
+    sort_order    INT          DEFAULT 0 COMMENT '排序',
+    status        VARCHAR(32)  DEFAULT 'PUBLISHED' COMMENT 'DRAFT/PUBLISHED/ARCHIVED',
+    PRIMARY KEY (layout_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='CMS版式注册表';
+
+INSERT INTO paleo_cms_layout (layout_code, layout_name, description, schema_json, sort_order, status) VALUES
+('list', '文章列表', '新闻、公告、党建文章等列表页',
+ '{"fields":[{"key":"listStyle","label":"列表样式","type":"select","options":[{"value":"simple","label":"简洁列表"},{"value":"card","label":"卡片列表"}],"default":"simple"},{"key":"showPinnedBadge","label":"显示置顶标记","type":"boolean","default":true},{"key":"pinnedLabel","label":"置顶标签","type":"text","default":"置顶"},{"key":"showDate","label":"显示日期","type":"boolean","default":true},{"key":"showCategory","label":"显示分类","type":"boolean","default":false},{"key":"showSummary","label":"显示摘要","type":"boolean","default":true}]}',
+ 1, 'PUBLISHED'),
+('list-multi-column', '多栏文章列表', '新闻发布等多分类列表',
+ '{"fields":[{"key":"columns","label":"栏目数","type":"number","default":3,"min":1,"max":4},{"key":"showCover","label":"显示封面","type":"boolean","default":true}]}',
+ 2, 'PUBLISHED'),
+('timeline', '时间线', '学会沿革等时间轴页面',
+ '{"fields":[{"key":"alternateSides","label":"左右交替","type":"boolean","default":true},{"key":"showCover","label":"显示配图","type":"boolean","default":true}]}',
+ 3, 'PUBLISHED'),
+('gallery-grid', '相册网格', '历史相册等图片网格',
+ '{"fields":[{"key":"filterLabel","label":"全部筛选标签","type":"text","default":"全部瞬间"},{"key":"columns","label":"列数","type":"number","default":4,"min":2,"max":6},{"key":"showFilters","label":"显示分类筛选","type":"boolean","default":true}]}',
+ 4, 'PUBLISHED'),
+('personnel-cards', '人员卡片', '组织机构人员展示',
+ '{"fields":[{"key":"columns","label":"每行列数","type":"number","default":3,"min":1,"max":4},{"key":"groupBySummary","label":"按职务分组","type":"boolean","default":true}]}',
+ 5, 'PUBLISHED'),
+('richtext-single', '单页富文本', '规章、党群机构等单页内容',
+ '{"fields":[{"key":"showBlocks","label":"显示页面区块","type":"boolean","default":true},{"key":"contentPadding","label":"内容区内边距","type":"select","options":[{"value":"normal","label":"标准"},{"value":"compact","label":"紧凑"}],"default":"normal"}]}',
+ 6, 'PUBLISHED'),
+('file-list', '文件列表', '资料下载、公开文件等',
+ '{"fields":[{"key":"groupByCategory","label":"按分类分组","type":"boolean","default":true},{"key":"showFileSize","label":"显示文件大小","type":"boolean","default":true},{"key":"showSearch","label":"显示搜索框","type":"boolean","default":false}]}',
+ 7, 'PUBLISHED'),
+('hybrid-home', '首页混合', '轮播+新闻+公告组合首页',
+ '{"fields":[{"key":"newsCount","label":"新闻条数","type":"number","default":6},{"key":"announcementCount","label":"公告条数","type":"number","default":4}]}',
+ 8, 'PUBLISHED'),
+('party-hub', '党建首页', '党建文化中心首页',
+ '{"fields":[{"key":"showQuickLinks","label":"显示快捷入口","type":"boolean","default":true}]}',
+ 9, 'PUBLISHED'),
+('mixed', '混合内容', '多 Tab 富文本等复合页面',
+ '{"fields":[{"key":"tabStyle","label":"Tab 样式","type":"select","options":[{"value":"underline","label":"下划线"},{"value":"pill","label":"胶囊"}],"default":"underline"}]}',
+ 10, 'PUBLISHED');

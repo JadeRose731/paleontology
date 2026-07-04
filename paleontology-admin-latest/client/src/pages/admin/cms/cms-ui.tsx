@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ALL_SOCIETY_UNITS } from "@shared/constants";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -21,7 +20,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { uploadCmsMedia } from "@/lib/cms-api";
 import { toast } from "sonner";
-import { Plus, Edit, Eye, Pin, Archive, Trash2, ArrowUp, ArrowDown, Bold, Italic, Link2, Image, Code, EyeIcon } from "lucide-react";
+import {
+  Plus, Edit, Eye, Pin, Archive, Trash2, ArrowUp, ArrowDown,
+  Bold, Italic, Underline as UnderlineIcon, Strikethrough, Link2, Image, EyeIcon,
+  AlignLeft, AlignCenter, AlignRight, AlignJustify,
+  List, ListOrdered, Indent, Outdent,
+  Undo2, Redo2, RemoveFormatting, Minus, Table as TableIcon,
+  Heading1, Heading2, Heading3, Quote, Code, Palette, Type,
+} from "lucide-react";
 import { type CmsArticle, type CmsContentStatus, CMS_STATUS_LABELS } from "./cms-data";
 
 export function scopeLabel(branchId: string | null): string {
@@ -35,6 +41,18 @@ export function statusBadgeClass(status: CmsContentStatus): string {
   return "text-gray-600 border-gray-300 bg-gray-50";
 }
 
+function ToolbarBtn({ title, onClick, children, active }: { title: string; onClick: () => void; children: React.ReactNode; active?: boolean }) {
+  return (
+    <Button type="button" variant={active ? "secondary" : "ghost"} size="sm" className="h-7 w-7 p-0" title={title} onClick={onClick}>
+      {children}
+    </Button>
+  );
+}
+
+function ToolbarSep() {
+  return <div className="w-px h-5 bg-border mx-0.5" />;
+}
+
 export function RichTextEditor({
   value,
   onChange,
@@ -44,69 +62,182 @@ export function RichTextEditor({
   onChange: (v: string) => void;
   label?: string;
 }) {
-  const [mode, setMode] = useState<"edit" | "preview">("edit");
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const lastHtmlRef = useRef(value);
 
-  const wrapSelection = (before: string, after: string) => {
-    const ta = document.getElementById("cms-richtext-area") as HTMLTextAreaElement | null;
-    if (!ta) return;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const selected = value.slice(start, end) || "文本";
-    const next = value.slice(0, start) + before + selected + after + value.slice(end);
-    onChange(next);
+  const syncFromEditor = useCallback(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const html = el.innerHTML;
+    if (html !== lastHtmlRef.current) {
+      lastHtmlRef.current = html;
+      onChange(html);
+    }
+  }, [onChange]);
+
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el || showPreview) return;
+    if (value !== lastHtmlRef.current) {
+      lastHtmlRef.current = value;
+      const sel = window.getSelection();
+      const hadFocus = document.activeElement === el;
+      let savedRange: Range | null = null;
+      if (hadFocus && sel && sel.rangeCount > 0) {
+        savedRange = sel.getRangeAt(0).cloneRange();
+      }
+      el.innerHTML = value;
+      if (hadFocus && savedRange) {
+        try {
+          sel?.removeAllRanges();
+          sel?.addRange(savedRange);
+        } catch { /* range may be invalid after innerHTML reset */ }
+      }
+    }
+  }, [value, showPreview]);
+
+  const execCmd = (cmd: string, val?: string) => {
+    editorRef.current?.focus();
+    document.execCommand(cmd, false, val);
+    syncFromEditor();
+  };
+
+  const handleFormatBlock = (tag: string) => {
+    execCmd("formatBlock", tag);
+  };
+
+  const handleInsertLink = () => {
+    const url = window.prompt("请输入链接地址", "https://");
+    if (url) execCmd("createLink", url);
+  };
+
+  const handleInsertImage = () => {
+    const url = window.prompt("请输入图片地址", "https://");
+    if (url) execCmd("insertImage", url);
+  };
+
+  const handleForeColor = () => {
+    const color = window.prompt("请输入颜色值（如 #ff0000、red）", "#002B49");
+    if (color) execCmd("foreColor", color);
+  };
+
+  const handleBackColor = () => {
+    const color = window.prompt("请输入背景色值（如 #ffff00）", "#f5e0ba");
+    if (color) execCmd("hiliteColor", color);
+  };
+
+  const handleFontSize = (size: string) => {
+    execCmd("fontSize", size);
+  };
+
+  const handleInsertTable = () => {
+    const rows = window.prompt("行数", "3");
+    const cols = window.prompt("列数", "3");
+    if (!rows || !cols) return;
+    const r = parseInt(rows, 10) || 3;
+    const c = parseInt(cols, 10) || 3;
+    let html = '<table style="border-collapse:collapse;width:100%;margin:8px 0"><tbody>';
+    for (let i = 0; i < r; i++) {
+      html += "<tr>";
+      for (let j = 0; j < c; j++) {
+        html += '<td style="border:1px solid #ddd;padding:8px;min-width:60px">&nbsp;</td>';
+      }
+      html += "</tr>";
+    }
+    html += "</tbody></table><p></p>";
+    execCmd("insertHTML", html);
   };
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label>{label}</Label>
-        <div className="flex gap-1">
-          <Button type="button" variant={mode === "edit" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setMode("edit")}>
-            <Code className="h-3 w-3 mr-1" /> 源码
-          </Button>
-          <Button type="button" variant={mode === "preview" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setMode("preview")}>
-            <EyeIcon className="h-3 w-3 mr-1" /> 预览
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant={showPreview ? "secondary" : "ghost"}
+          size="sm"
+          className="h-7 text-xs"
+          onClick={() => setShowPreview(!showPreview)}
+        >
+          <EyeIcon className="h-3 w-3 mr-1" /> {showPreview ? "继续编辑" : "预览"}
+        </Button>
       </div>
-      {mode === "edit" && (
+      {!showPreview && (
         <>
-          <div className="flex flex-wrap gap-1 border rounded-md p-1 bg-muted/30">
-            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" title="加粗" onClick={() => wrapSelection("<strong>", "</strong>")}>
-              <Bold className="h-3.5 w-3.5" />
-            </Button>
-            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" title="斜体" onClick={() => wrapSelection("<em>", "</em>")}>
-              <Italic className="h-3.5 w-3.5" />
-            </Button>
-            <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" title="链接" onClick={() => wrapSelection('<a href="https://" target="_blank">', "</a>")}>
-              <Link2 className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              title="图片"
-              onClick={() => wrapSelection('<img src="/media/" alt="" />', "")}
-            >
-              <Image className="h-3.5 w-3.5" />
-            </Button>
-            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => wrapSelection("<table><tr><td>", "</td></tr></table>")}>
-              表格
-            </Button>
+          <div className="flex flex-wrap items-center gap-0.5 border rounded-md p-1.5 bg-muted/30">
+            {/* Undo / Redo */}
+            <ToolbarBtn title="撤销" onClick={() => execCmd("undo")}><Undo2 className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="重做" onClick={() => execCmd("redo")}><Redo2 className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarSep />
+            {/* Headings */}
+            <ToolbarBtn title="标题1" onClick={() => handleFormatBlock("h1")}><Heading1 className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="标题2" onClick={() => handleFormatBlock("h2")}><Heading2 className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="标题3" onClick={() => handleFormatBlock("h3")}><Heading3 className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="正文" onClick={() => handleFormatBlock("p")}><Type className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarSep />
+            {/* Font size */}
+            <select className="h-7 text-xs border rounded px-1 bg-background" onChange={e => { if (e.target.value) handleFontSize(e.target.value); e.target.value = ""; }} defaultValue="">
+              <option value="" disabled>字号</option>
+              <option value="1">小</option>
+              <option value="2">较小</option>
+              <option value="3">正常</option>
+              <option value="4">较大</option>
+              <option value="5">大</option>
+              <option value="6">很大</option>
+              <option value="7">超大</option>
+            </select>
+            <ToolbarSep />
+            {/* Text formatting */}
+            <ToolbarBtn title="加粗" onClick={() => execCmd("bold")}><Bold className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="斜体" onClick={() => execCmd("italic")}><Italic className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="下划线" onClick={() => execCmd("underline")}><UnderlineIcon className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="删除线" onClick={() => execCmd("strikeThrough")}><Strikethrough className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarSep />
+            {/* Colors */}
+            <ToolbarBtn title="文字颜色" onClick={handleForeColor}><Palette className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="背景色" onClick={handleBackColor}>
+              <span className="h-3.5 w-3.5 border border-current rounded-sm bg-yellow-200 block" />
+            </ToolbarBtn>
+            <ToolbarSep />
+            {/* Alignment */}
+            <ToolbarBtn title="左对齐" onClick={() => execCmd("justifyLeft")}><AlignLeft className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="居中" onClick={() => execCmd("justifyCenter")}><AlignCenter className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="右对齐" onClick={() => execCmd("justifyRight")}><AlignRight className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="两端对齐" onClick={() => execCmd("justifyFull")}><AlignJustify className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarSep />
+            {/* Lists */}
+            <ToolbarBtn title="无序列表" onClick={() => execCmd("insertUnorderedList")}><List className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="有序列表" onClick={() => execCmd("insertOrderedList")}><ListOrdered className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="增加缩进" onClick={() => execCmd("indent")}><Indent className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="减少缩进" onClick={() => execCmd("outdent")}><Outdent className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarSep />
+            {/* Block elements */}
+            <ToolbarBtn title="引用块" onClick={() => handleFormatBlock("blockquote")}><Quote className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="代码块" onClick={() => handleFormatBlock("pre")}><Code className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="分隔线" onClick={() => execCmd("insertHorizontalRule")}><Minus className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarSep />
+            {/* Insert */}
+            <ToolbarBtn title="插入链接" onClick={handleInsertLink}><Link2 className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="插入图片" onClick={handleInsertImage}><Image className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarBtn title="插入表格" onClick={handleInsertTable}><TableIcon className="h-3.5 w-3.5" /></ToolbarBtn>
+            <ToolbarSep />
+            {/* Clear */}
+            <ToolbarBtn title="清除格式" onClick={() => execCmd("removeFormat")}><RemoveFormatting className="h-3.5 w-3.5" /></ToolbarBtn>
           </div>
-          <Textarea
-            id="cms-richtext-area"
-            rows={8}
-            className="font-mono text-xs"
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            placeholder="支持 HTML 格式"
+          <div
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
+            className="border rounded-md p-4 min-h-[320px] bg-white focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 prose prose-sm max-w-none [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:p-2 [&_th]:border [&_th]:border-gray-300 [&_th]:p-2 [&_blockquote]:border-l-4 [&_blockquote]:border-primary [&_blockquote]:pl-4 [&_blockquote]:italic"
+            onInput={syncFromEditor}
+            onBlur={syncFromEditor}
+            dangerouslySetInnerHTML={{ __html: value }}
           />
         </>
       )}
-      {mode === "preview" && (
-        <div className="border rounded-md p-4 min-h-[160px] bg-white prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: value || "<p class='text-muted-foreground'>暂无内容</p>" }} />
+      {showPreview && (
+        <div className="border rounded-md p-6 min-h-[320px] bg-white prose prose-sm max-w-none [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:p-2 [&_th]:border [&_th]:border-gray-300 [&_th]:p-2" dangerouslySetInnerHTML={{ __html: value || "<p class='text-muted-foreground'>暂无内容</p>" }} />
       )}
     </div>
   );

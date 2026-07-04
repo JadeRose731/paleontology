@@ -34,16 +34,40 @@ export interface ApiCmsChannel {
   channelId?: number;
   channelCode: string;
   parentId?: number;
-  routePath?: string;
+  routePath?: string | null;
   navName?: string;
   sortOrder?: number;
   visible?: string;
+  showInAdmin?: string;
+  adminSection?: string | null;
+  navIcon?: string | null;
+  adminRoles?: string | null;
   title?: string;
   subtitle?: string;
-  layoutType?: string;
-  contentModule?: string;
+  kicker?: string;
+  breadcrumbName?: string;
+  layoutType?: string | null;
+  layoutParams?: string | null;
+  contentModule?: string | null;
+  contentFilter?: string | null;
   pageType?: string;
-  shellType?: string;
+  shellType?: string | null;
+  status?: string;
+  locked?: string;
+  remark?: string | null;
+}
+
+export interface ApiCmsChannelTreeNode {
+  channel: ApiCmsChannel;
+  children?: ApiCmsChannelTreeNode[];
+}
+
+export interface ApiCmsLayout {
+  layoutCode: string;
+  layoutName: string;
+  description?: string | null;
+  schemaJson?: string | null;
+  sortOrder?: number;
   status?: string;
 }
 
@@ -134,6 +158,65 @@ export async function getPublicCmsEntry(entryId: number): Promise<ApiCmsEntry> {
 export async function listPublicChannels(): Promise<ApiCmsChannel[]> {
   const json = await request<ApiResponse<ApiCmsChannel[]>>("/paleo/cms-channels/public/list");
   return (json as ApiResponse<ApiCmsChannel[]>).data ?? [];
+}
+
+/** 管理端：栏目列表 */
+export async function listCmsChannels(): Promise<ApiCmsChannel[]> {
+  await ensureCmsAuth();
+  const json = await request<ApiResponse & { rows?: ApiCmsChannel[] }>(
+    "/paleo/cms-channels/list?pageNum=1&pageSize=500"
+  );
+  return json.rows ?? [];
+}
+
+/** 管理端：栏目树 */
+export async function listCmsChannelTree(): Promise<ApiCmsChannelTreeNode[]> {
+  await ensureCmsAuth();
+  const json = await request<ApiResponse<ApiCmsChannelTreeNode[]>>("/paleo/cms-channels/tree");
+  return (json as ApiResponse<ApiCmsChannelTreeNode[]>).data ?? [];
+}
+
+/** 管理端：栏目详情 */
+export async function getCmsChannel(channelId: number): Promise<ApiCmsChannel> {
+  await ensureCmsAuth();
+  const json = await request<ApiResponse<ApiCmsChannel>>(`/paleo/cms-channels/${channelId}`);
+  const data = (json as ApiResponse<ApiCmsChannel>).data;
+  if (!data) throw new Error("栏目不存在");
+  return data;
+}
+
+/** 管理端：新增栏目 */
+export async function createCmsChannel(channel: ApiCmsChannel): Promise<void> {
+  await ensureCmsAuth();
+  await request("/paleo/cms-channels", { method: "POST", body: JSON.stringify(channel) });
+}
+
+/** 管理端：更新栏目 */
+export async function updateCmsChannel(channel: ApiCmsChannel): Promise<void> {
+  await ensureCmsAuth();
+  await request("/paleo/cms-channels", { method: "PUT", body: JSON.stringify(channel) });
+}
+
+/** 管理端：更新栏目状态 */
+export async function updateCmsChannelStatus(channelId: number, status: string): Promise<void> {
+  await ensureCmsAuth();
+  await request(`/paleo/cms-channels/${channelId}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
+}
+
+/** 管理端：删除栏目 */
+export async function deleteCmsChannel(channelId: number): Promise<void> {
+  await ensureCmsAuth();
+  await request(`/paleo/cms-channels/${channelId}/delete`, { method: "POST" });
+}
+
+/** 管理端：版式注册表列表 */
+export async function listCmsLayouts(): Promise<ApiCmsLayout[]> {
+  await ensureCmsAuth();
+  const json = await request<ApiResponse<ApiCmsLayout[]>>("/paleo/cms-layouts/list");
+  return (json as ApiResponse<ApiCmsLayout[]>).data ?? [];
 }
 
 /** 公开：栏目详情含区块 */
@@ -227,4 +310,38 @@ export function entryIdStr(entryId?: number | null): string {
 export function parseEntryId(id: string): number | null {
   if (/^\d+$/.test(id)) return parseInt(id, 10);
   return null;
+}
+
+// ── 仪表盘统计 API ──────────────────────────────────────────────────────────
+
+export interface ApiDashboardStats {
+  totalUsers: number;
+  memberCount: number;
+  nonMemberCount: number;
+  activeMembers: number;
+  studentMembers: number;
+  nonStudentMembers: number;
+  studentNonMembers: number;
+  nonStudentNonMembers: number;
+  totalMembershipFee: number;
+  totalConferenceFee: number;
+  activeConferences: number;
+  branchMemberCounts: { name: string; count: number }[];
+  perSocietyConferenceFee: Record<string, number>;
+}
+
+export async function fetchDashboardStats(): Promise<ApiDashboardStats | null> {
+  try {
+    const res = await fetch("/paleo/dashboard/stats", {
+      headers: {
+        Authorization: `Bearer ${getToken() || ""}`,
+      },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.code !== 200) return null;
+    return json.data as ApiDashboardStats;
+  } catch {
+    return null;
+  }
 }

@@ -89,7 +89,7 @@ function RecordDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>记录详情</DialogTitle>
           <DialogDescription>{record.id}</DialogDescription>

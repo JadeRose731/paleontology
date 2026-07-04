@@ -8,6 +8,8 @@ import { motion } from "framer-motion";
 import { LayoutDashboard, Users, ClipboardCheck, Calendar, CreditCard, Clock, AlertCircle, FileText, GraduationCap, TrendingUp } from "lucide-react";
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { MEMBERSHIP_STATUS_LABEL, ALL_SOCIETY_UNITS, CONFERENCE_FEE_TYPE_LABEL, CONFERENCE_FEE_TYPE } from "@shared/constants";
+import { useEffect, useState } from "react";
+import { fetchDashboardStats, type ApiDashboardStats } from "@/lib/cms-api";
 
 const CHART_COLORS = ["#002B49", "#C41E3A", "#D9C5A0", "#715a3e", "#406182", "#8B0000"];
 
@@ -75,8 +77,37 @@ function ReviewStatusBadge({ status }: { status: string }) {
 
 function SuperAdminView({ stats }: { stats: DashboardStats }) {
   const { getGlobalStats, getAllConferences } = useAdmin();
-  const globalStats = getGlobalStats();
+  const localGlobalStats = getGlobalStats();
   const allConfs = getAllConferences();
+
+  const [apiStats, setApiStats] = useState<ApiDashboardStats | null>(null);
+  useEffect(() => {
+    fetchDashboardStats().then(data => { if (data) setApiStats(data); });
+  }, []);
+
+  const globalStats = apiStats ? {
+    ...localGlobalStats,
+    studentMembers: apiStats.studentMembers,
+    nonStudentMembers: apiStats.nonStudentMembers,
+    studentNonMembers: apiStats.studentNonMembers,
+    nonStudentNonMembers: apiStats.nonStudentNonMembers,
+    totalMembershipFee: apiStats.totalMembershipFee,
+    totalConferenceFee: apiStats.totalConferenceFee,
+    studentMembershipFeeAmount: localGlobalStats.studentMembershipFeeAmount,
+    nonStudentMembershipFeeAmount: localGlobalStats.nonStudentMembershipFeeAmount,
+    perSocietyConferenceFee: localGlobalStats.perSocietyConferenceFee,
+    perSocietyFeeBreakdown: localGlobalStats.perSocietyFeeBreakdown,
+  } : localGlobalStats;
+
+  const effectiveStats: DashboardStats = apiStats ? {
+    ...stats,
+    totalUsers: apiStats.totalUsers,
+    memberCount: apiStats.memberCount,
+    nonMemberCount: apiStats.nonMemberCount,
+    activeMembers: apiStats.activeMembers,
+    activeConferences: apiStats.activeConferences,
+    branchMemberCounts: apiStats.branchMemberCounts.length > 0 ? apiStats.branchMemberCounts : stats.branchMemberCounts,
+  } : stats;
 
   // 12-society conference fee bar chart data
   const societyFeeData = Object.entries(ALL_SOCIETY_UNITS).map(([id, name]) => ({
@@ -106,18 +137,18 @@ function SuperAdminView({ stats }: { stats: DashboardStats }) {
     })
     .filter(d => d.confCount > 0 || d.totalRegs > 0);
 
-  const paymentTrendData = stats.paymentTrend.length > 0
-    ? stats.paymentTrend
+  const paymentTrendData = effectiveStats.paymentTrend.length > 0
+    ? effectiveStats.paymentTrend
     : [{ month: new Date().toISOString().slice(0, 7), count: 0 }];
 
   return (
     <div className="space-y-6">
       {/* Row 1: Basic stats */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="用户总数" value={stats.totalUsers} icon={Users} delay={0} />
-        <StatCard title="非会员" value={stats.nonMemberCount} icon={Users} delay={0.1} />
-        <StatCard title="会员" value={stats.memberCount} icon={LayoutDashboard} delay={0.15} />
-        <StatCard title="活跃会员" value={stats.activeMembers} icon={LayoutDashboard} delay={0.2} />
+        <StatCard title="用户总数" value={effectiveStats.totalUsers} icon={Users} delay={0} />
+        <StatCard title="非会员" value={effectiveStats.nonMemberCount} icon={Users} delay={0.1} />
+        <StatCard title="会员" value={effectiveStats.memberCount} icon={LayoutDashboard} delay={0.15} />
+        <StatCard title="活跃会员" value={effectiveStats.activeMembers} icon={LayoutDashboard} delay={0.2} />
       </div>
 
       {/* Row 1b: Fee totals */}
@@ -208,9 +239,9 @@ function SuperAdminView({ stats }: { stats: DashboardStats }) {
               <CardDescription>各分会绑定用户数量统计</CardDescription>
             </CardHeader>
             <CardContent>
-              {stats.branchMemberCounts && stats.branchMemberCounts.length > 0 ? (
-                <ResponsiveContainer width="100%" height={Math.max(320, stats.branchMemberCounts.length * 52)}>
-                  <BarChart data={stats.branchMemberCounts} layout="vertical" margin={{ top: 5, right: 50, left: 10, bottom: 5 }}>
+              {effectiveStats.branchMemberCounts && effectiveStats.branchMemberCounts.length > 0 ? (
+                <ResponsiveContainer width="100%" height={Math.max(320, effectiveStats.branchMemberCounts.length * 52)}>
+                  <BarChart data={effectiveStats.branchMemberCounts} layout="vertical" margin={{ top: 5, right: 50, left: 10, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E1DA" horizontal={false} />
                     <XAxis type="number" />
                     <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
@@ -393,7 +424,7 @@ function SuperAdminView({ stats }: { stats: DashboardStats }) {
               <CardTitle className="text-lg">最近审核记录</CardTitle>
             </CardHeader>
             <CardContent>
-              {stats.recentReviews && stats.recentReviews.length > 0 ? (
+              {effectiveStats.recentReviews && effectiveStats.recentReviews.length > 0 ? (
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -405,7 +436,7 @@ function SuperAdminView({ stats }: { stats: DashboardStats }) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stats.recentReviews.slice(0, 5).map((r: ReviewItem) => (
+                    {effectiveStats.recentReviews.slice(0, 5).map((r: ReviewItem) => (
                       <TableRow key={r.id}>
                         <TableCell className="font-medium">{r.userName || r.userEmail}</TableCell>
                         <TableCell>

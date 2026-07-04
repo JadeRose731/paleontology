@@ -285,8 +285,14 @@ export interface CmsQuickLink {
 export interface CmsSiteConfig {
   copyright: string;
   contactPhone: string;
+  contactFax: string;
   contactEmail: string;
   address: string;
+  zipCode: string;
+  icpNumber: string;
+  securityNumber: string;
+  qrCodeWechat: string;
+  qrCodeMember: string;
   friendLinks: { name: string; url: string }[];
   quickLinks: CmsQuickLink[];
 }
@@ -729,13 +735,21 @@ export const DEFAULT_CMS: CmsDatabase = {
     },
   ],
   siteConfig: {
-    copyright: "© 2026 中国古生物学会 版权所有",
-    contactPhone: "010-XXXXXXXX",
-    contactEmail: "office@paleo.cn",
-    address: "北京市西城区XXXX号",
+    copyright: "© 2026 中国古生物学会 版权所有. All Rights Reserved.",
+    contactPhone: "025-83282138",
+    contactFax: "025-83357026",
+    contactEmail: "psc@nigpas.ac.cn",
+    address: "南京市北京东路39号",
+    zipCode: "210008",
+    icpNumber: "苏ICP备16036686号-1",
+    securityNumber: "苏公网安备 32010202010139号",
+    qrCodeWechat: "",
+    qrCodeMember: "",
     friendLinks: [
-      { name: "中国科协", url: "https://www.cast.org.cn" },
-      { name: "国家自然科学基金委员会", url: "https://www.nsfc.gov.cn" },
+      { name: "中国地理学会", url: "" },
+      { name: "中国地质学会", url: "" },
+      { name: "国际古生物协会 (IPA)", url: "" },
+      { name: "亚洲古生物学会", url: "" },
     ],
     quickLinks: [
       { id: "ql-1", label: "会员注册", path: "/services", icon: "person_add", sort: 1, enabled: true },
