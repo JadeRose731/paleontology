@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Api(tags = "会员业务")
 @RestController
@@ -64,7 +65,7 @@ public class PaleoMembershipController extends BaseController {
                 .orderByDesc(PaleoMembershipPayment::getCreateTime))
                 .stream()
                 .filter(paymentService::isDisplayable)
-                .toList();
+                .collect(Collectors.toList());
         return success(enrichPayments(list));
     }
 

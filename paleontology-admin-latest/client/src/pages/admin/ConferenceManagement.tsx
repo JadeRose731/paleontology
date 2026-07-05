@@ -10,8 +10,37 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Edit, MapPin, Calendar, Users, AlertCircle } from "lucide-react";
 import { ALL_SOCIETY_UNITS, type ConferenceFeeConfig, createDefaultFieldTripRoutes, FIELD_TRIP_GENDER_RESTRICTION_LABEL, type FieldTripGenderRestriction, type FieldTripRoute } from "@shared/constants";
+import { uploadCmsMedia } from "@/lib/cms-api";
+import { toast } from "sonner";
 
 const ALL_BRANCH_OPTIONS = Object.entries(ALL_SOCIETY_UNITS).map(([id, name]) => ({ value: id, label: name }));
+
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+
+interface UploadedFileRef {
+  name: string;
+  url: string;
+}
+
+/** Skip legacy base64 blobs — loading them into state causes OOM crashes. */
+function resolveStoredFile(
+  fallbackName: string,
+  url?: string | null,
+  storedName?: string
+): UploadedFileRef | null {
+  if (!url || url.startsWith("data:")) return null;
+  return { name: storedName || fallbackName, url };
+}
+
+async function uploadDocument(file: File, title: string): Promise<UploadedFileRef> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error("文件大小不能超过 20MB");
+  }
+  const entry = await uploadCmsMedia(file, title, "document");
+  const url = entry.mediaUrl ?? entry.fileUrl ?? "";
+  if (!url) throw new Error("上传成功但未返回文件地址");
+  return { name: file.name, url };
+}
 
 const DEFAULT_SESSION = { id: `session-${Date.now()}`, name: "" };
 
@@ -58,64 +87,76 @@ function ConferenceForm({
     initialData?.sessions || []
   );
   const [errors, setErrors] = useState<Record<string, string>>({});
-  // Phase 2: File upload state
-  const [publicNoticeFile, setPublicNoticeFile] = useState<{ name: string; dataUrl: string } | null>(
-    initialData?.publicNoticeUrl ? { name: initialData.publicNoticeName || "public_notice.pdf", dataUrl: initialData.publicNoticeUrl } : null
+  const [uploading, setUploading] = useState<Record<string, boolean>>({});
+  // Phase 2: File upload state (server URL only — never base64 in memory)
+  const [publicNoticeFile, setPublicNoticeFile] = useState<UploadedFileRef | null>(
+    resolveStoredFile("public_notice.pdf", initialData?.publicNoticeUrl, initialData?.publicNoticeName)
   );
-  const [stampedNoticeFile, setStampedNoticeFile] = useState<{ name: string; dataUrl: string } | null>(
-    initialData?.stampedNoticeUrl ? { name: initialData.stampedNoticeName || "notice.pdf", dataUrl: initialData.stampedNoticeUrl } : null
+  const [stampedNoticeFile, setStampedNoticeFile] = useState<UploadedFileRef | null>(
+    resolveStoredFile("notice.pdf", initialData?.stampedNoticeUrl, initialData?.stampedNoticeName)
   );
-  const [abstractTemplateFile, setAbstractTemplateFile] = useState<{ name: string; dataUrl: string } | null>(
-    initialData?.abstractTemplateUrl ? { name: initialData.abstractTemplateName || "template.docx", dataUrl: initialData.abstractTemplateUrl } : null
+  const [abstractTemplateFile, setAbstractTemplateFile] = useState<UploadedFileRef | null>(
+    resolveStoredFile("template.docx", initialData?.abstractTemplateUrl, initialData?.abstractTemplateName)
   );
-  // Phase 6: 学会级别模板（入会/退会申请书）— 存储在全局 localStorage
-  const [membershipAppTemplateFile, setMembershipAppTemplateFile] = useState<{ name: string; dataUrl: string } | null>(() => {
+  // Phase 6: 学会级别模板（入会/退会申请书）— 仅存 URL
+  const [membershipAppTemplateFile, setMembershipAppTemplateFile] = useState<UploadedFileRef | null>(() => {
     const stored = localStorage.getItem("paleo_membership_application_template");
-    if (stored) {
-      try { const d = JSON.parse(stored); return { name: d.name || "入会申请书模板.docx", dataUrl: d.url || "" }; }
-      catch { return null; }
+    if (!stored) return null;
+    try {
+      const d = JSON.parse(stored);
+      return resolveStoredFile("入会申请书模板.docx", d.url, d.name);
+    } catch {
+      return null;
     }
-    return null;
   });
-  const [withdrawalAppTemplateFile, setWithdrawalAppTemplateFile] = useState<{ name: string; dataUrl: string } | null>(() => {
+  const [withdrawalAppTemplateFile, setWithdrawalAppTemplateFile] = useState<UploadedFileRef | null>(() => {
     const stored = localStorage.getItem("paleo_withdrawal_application_template");
-    if (stored) {
-      try { const d = JSON.parse(stored); return { name: d.name || "退会申请书模板.docx", dataUrl: d.url || "" }; }
-      catch { return null; }
+    if (!stored) return null;
+    try {
+      const d = JSON.parse(stored);
+      return resolveStoredFile("退会申请书模板.docx", d.url, d.name);
+    } catch {
+      return null;
     }
-    return null;
   });
 
-  const handleFileUpload = (fileType: "publicNotice" | "stampedNotice" | "abstractTemplate", file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      if (fileType === "publicNotice") {
-        setPublicNoticeFile({ name: file.name, dataUrl });
-      } else if (fileType === "stampedNotice") {
-        setStampedNoticeFile({ name: file.name, dataUrl });
-      } else {
-        setAbstractTemplateFile({ name: file.name, dataUrl });
-      }
-    };
-    reader.readAsDataURL(file);
+  const handleFileUpload = async (
+    fileType: "publicNotice" | "stampedNotice" | "abstractTemplate",
+    file: File
+  ) => {
+    setUploading((prev) => ({ ...prev, [fileType]: true }));
+    try {
+      const ref = await uploadDocument(file, file.name);
+      if (fileType === "publicNotice") setPublicNoticeFile(ref);
+      else if (fileType === "stampedNotice") setStampedNoticeFile(ref);
+      else setAbstractTemplateFile(ref);
+      toast.success(`${file.name} 已上传`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "上传失败");
+    } finally {
+      setUploading((prev) => ({ ...prev, [fileType]: false }));
+    }
   };
 
-  // Phase 6: 模板文件上传（入会/退会申请书）
-  const handleTemplateUpload = (templateType: "membershipApp" | "withdrawalApp", file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      const templateData = { name: file.name, url: dataUrl, updatedAt: new Date().toISOString() };
+  const handleTemplateUpload = async (templateType: "membershipApp" | "withdrawalApp", file: File) => {
+    const key = templateType;
+    setUploading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const ref = await uploadDocument(file, file.name);
+      const templateData = { name: ref.name, url: ref.url, updatedAt: new Date().toISOString() };
       if (templateType === "membershipApp") {
-        setMembershipAppTemplateFile({ name: file.name, dataUrl });
+        setMembershipAppTemplateFile(ref);
         localStorage.setItem("paleo_membership_application_template", JSON.stringify(templateData));
       } else {
-        setWithdrawalAppTemplateFile({ name: file.name, dataUrl });
+        setWithdrawalAppTemplateFile(ref);
         localStorage.setItem("paleo_withdrawal_application_template", JSON.stringify(templateData));
       }
-    };
-    reader.readAsDataURL(file);
+      toast.success(`${file.name} 已上传`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "上传失败");
+    } finally {
+      setUploading((prev) => ({ ...prev, [key]: false }));
+    }
   };
 
   const addSession = () => {
@@ -190,11 +231,11 @@ function ConferenceForm({
       sessions: sessions.filter((s) => s.name.trim()),
       status,
       // Phase 2: Include file data
-      publicNoticeUrl: publicNoticeFile?.dataUrl,
+      publicNoticeUrl: publicNoticeFile?.url,
       publicNoticeName: publicNoticeFile?.name,
-      stampedNoticeUrl: stampedNoticeFile?.dataUrl,
+      stampedNoticeUrl: stampedNoticeFile?.url,
       stampedNoticeName: stampedNoticeFile?.name,
-      abstractTemplateUrl: abstractTemplateFile?.dataUrl,
+      abstractTemplateUrl: abstractTemplateFile?.url,
       abstractTemplateName: abstractTemplateFile?.name,
     });
   };
@@ -426,11 +467,15 @@ function ConferenceForm({
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) handleFileUpload("publicNotice", file);
+                    if (file) void handleFileUpload("publicNotice", file);
+                    e.target.value = "";
                   }}
+                  disabled={uploading.publicNotice}
                 />
                 <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center hover:border-strata-blue-deep transition-colors">
-                  {publicNoticeFile ? (
+                  {uploading.publicNotice ? (
+                    <span className="text-slate-400 text-xs">上传中…</span>
+                  ) : publicNoticeFile ? (
                     <span className="text-green-600 font-bold text-xs flex items-center justify-center gap-1">
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
                       {publicNoticeFile.name}
@@ -459,11 +504,15 @@ function ConferenceForm({
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) handleFileUpload("stampedNotice", file);
+                    if (file) void handleFileUpload("stampedNotice", file);
+                    e.target.value = "";
                   }}
+                  disabled={uploading.stampedNotice}
                 />
                 <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center hover:border-strata-blue-deep transition-colors">
-                  {stampedNoticeFile ? (
+                  {uploading.stampedNotice ? (
+                    <span className="text-slate-400 text-xs">上传中…</span>
+                  ) : stampedNoticeFile ? (
                     <span className="text-green-600 font-bold text-xs flex items-center justify-center gap-1">
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
                       {stampedNoticeFile.name}
@@ -496,11 +545,15 @@ function ConferenceForm({
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) handleFileUpload("abstractTemplate", file);
+                    if (file) void handleFileUpload("abstractTemplate", file);
+                    e.target.value = "";
                   }}
+                  disabled={uploading.abstractTemplate}
                 />
                 <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center hover:border-strata-blue-deep transition-colors">
-                  {abstractTemplateFile ? (
+                  {uploading.abstractTemplate ? (
+                    <span className="text-slate-400 text-xs">上传中…</span>
+                  ) : abstractTemplateFile ? (
                     <span className="text-green-600 font-bold text-xs flex items-center justify-center gap-1">
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
                       {abstractTemplateFile.name}
@@ -541,11 +594,15 @@ function ConferenceForm({
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) handleTemplateUpload("membershipApp", file);
+                    if (file) void handleTemplateUpload("membershipApp", file);
+                    e.target.value = "";
                   }}
+                  disabled={uploading.membershipApp}
                 />
                 <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center hover:border-strata-blue-deep transition-colors">
-                  {membershipAppTemplateFile ? (
+                  {uploading.membershipApp ? (
+                    <span className="text-slate-400 text-xs">上传中…</span>
+                  ) : membershipAppTemplateFile ? (
                     <span className="text-green-600 font-bold text-xs flex items-center justify-center gap-1">
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
                       {membershipAppTemplateFile.name}
@@ -581,11 +638,15 @@ function ConferenceForm({
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (file) handleTemplateUpload("withdrawalApp", file);
+                    if (file) void handleTemplateUpload("withdrawalApp", file);
+                    e.target.value = "";
                   }}
+                  disabled={uploading.withdrawalApp}
                 />
                 <div className="border-2 border-dashed border-slate-300 rounded-lg p-3 text-center hover:border-strata-blue-deep transition-colors">
-                  {withdrawalAppTemplateFile ? (
+                  {uploading.withdrawalApp ? (
+                    <span className="text-slate-400 text-xs">上传中…</span>
+                  ) : withdrawalAppTemplateFile ? (
                     <span className="text-green-600 font-bold text-xs flex items-center justify-center gap-1">
                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
                       {withdrawalAppTemplateFile.name}

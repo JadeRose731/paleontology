@@ -1868,6 +1868,20 @@ function mapDirectoryRow(row: ApiMemberDirectoryRow): MemberRecord {
   };
 }
 
+function sanitizeFileUrl(url?: string): string | undefined {
+  if (!url || url.startsWith("data:")) return undefined;
+  return url;
+}
+
+function sanitizeConferenceData(data: ConferenceData): ConferenceData {
+  return {
+    ...data,
+    publicNoticeUrl: sanitizeFileUrl(data.publicNoticeUrl),
+    stampedNoticeUrl: sanitizeFileUrl(data.stampedNoticeUrl),
+    abstractTemplateUrl: sanitizeFileUrl(data.abstractTemplateUrl),
+  };
+}
+
 // ============================================================================
 // CONTEXT
 // ============================================================================
@@ -2537,35 +2551,36 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   const createConference = useCallback((data: ConferenceData) => {
+    const safeData = sanitizeConferenceData(data);
     // Phase 1: 分会管理员只能为本分会创建会议
-    if (adminRole === "branch_admin" && adminBranchId && data.branchId !== adminBranchId) {
+    if (adminRole === "branch_admin" && adminBranchId && safeData.branchId !== adminBranchId) {
       toast.error("您只能为本分会创建会议");
       return;
     }
     const stored = localStorage.getItem("paleo_admin_conferences_db");
     const confs: ConferenceRecord[] = stored ? JSON.parse(stored) : DEFAULT_CONFERENCES;
     const newConf: ConferenceRecord = {
-      ...data,
+      ...safeData,
       id: `conf-${Date.now()}`,
-      branchName: resolveSocietyName(data.branchId),
-      memberFee: data.feeConfig?.nonStudentMember || data.memberFee || 1000,
-      nonMemberFee: data.feeConfig?.nonStudentNonMember || data.nonMemberFee || Math.round((data.feeConfig?.nonStudentMember || data.memberFee || 1000) * 1.1),
+      branchName: resolveSocietyName(safeData.branchId),
+      memberFee: safeData.feeConfig?.nonStudentMember || safeData.memberFee || 1000,
+      nonMemberFee: safeData.feeConfig?.nonStudentNonMember || safeData.nonMemberFee || Math.round((safeData.feeConfig?.nonStudentMember || safeData.memberFee || 1000) * 1.1),
       registrations: 0,
-      accommodationDeadline: data.accommodationDeadline,
-      fieldTripDeadline: data.fieldTripDeadline,
-      fieldTripRoutes: data.fieldTripRoutes,
+      accommodationDeadline: safeData.accommodationDeadline,
+      fieldTripDeadline: safeData.fieldTripDeadline,
+      fieldTripRoutes: safeData.fieldTripRoutes,
     };
     confs.push(newConf);
     localStorage.setItem("paleo_admin_conferences_db", JSON.stringify(confs));
     // Sync fee config
-    if (data.feeConfig) {
+    if (safeData.feeConfig) {
       const feeConfigs = JSON.parse(localStorage.getItem("paleo_admin_conference_fee_configs") || "{}");
-      feeConfigs[newConf.id] = data.feeConfig;
+      feeConfigs[newConf.id] = safeData.feeConfig;
       localStorage.setItem("paleo_admin_conference_fee_configs", JSON.stringify(feeConfigs));
       localStorage.setItem("paleo_conference_fee_configs", JSON.stringify(feeConfigs));
     } else {
       const feeMap = JSON.parse(localStorage.getItem("paleo_admin_conference_fee_config") || "{}");
-      feeMap[newConf.id] = data.memberFee;
+      feeMap[newConf.id] = safeData.memberFee;
       localStorage.setItem("paleo_admin_conference_fee_config", JSON.stringify(feeMap));
     }
     toast.success("会议创建成功");
@@ -2573,6 +2588,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [triggerRefresh, adminRole, adminBranchId]);
 
   const updateConference = useCallback((id: string, data: ConferenceData) => {
+    const safeData = sanitizeConferenceData(data);
     const stored = localStorage.getItem("paleo_admin_conferences_db");
     const confs: ConferenceRecord[] = stored ? JSON.parse(stored) : DEFAULT_CONFERENCES;
     // Phase 1: 分会管理员只能修改本分会的会议
@@ -2583,7 +2599,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     const idx = confs.findIndex((c: ConferenceRecord) => c.id === id);
     if (idx >= 0) {
-      confs[idx] = { ...confs[idx], ...data, branchName: resolveSocietyName(data.branchId) };
+      confs[idx] = { ...confs[idx], ...safeData, branchName: resolveSocietyName(safeData.branchId) };
       localStorage.setItem("paleo_admin_conferences_db", JSON.stringify(confs));
       toast.success("会议更新成功");
       triggerRefresh();
@@ -3255,7 +3271,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const getMembershipApplicationTemplateUrlAction = useCallback((): string => {
     const stored = localStorage.getItem("paleo_membership_application_template");
     if (stored) {
-      try { return JSON.parse(stored).url || ""; } catch { return ""; }
+      try {
+        const url = JSON.parse(stored).url || "";
+        return url.startsWith("data:") ? "" : url;
+      } catch { return ""; }
     }
     return "";
   }, []);
@@ -3263,7 +3282,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const getWithdrawalApplicationTemplateUrlAction = useCallback((): string => {
     const stored = localStorage.getItem("paleo_withdrawal_application_template");
     if (stored) {
-      try { return JSON.parse(stored).url || ""; } catch { return ""; }
+      try {
+        const url = JSON.parse(stored).url || "";
+        return url.startsWith("data:") ? "" : url;
+      } catch { return ""; }
     }
     return "";
   }, []);

@@ -1580,7 +1580,8 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (stored) {
       try {
         const data = JSON.parse(stored);
-        return data.url || "";
+        const url = data.url || "";
+        return url.startsWith("data:") ? "" : url;
       } catch { return ""; }
     }
     return "";
@@ -1592,7 +1593,8 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (stored) {
       try {
         const data = JSON.parse(stored);
-        return data.url || "";
+        const url = data.url || "";
+        return url.startsWith("data:") ? "" : url;
       } catch { return ""; }
     }
     return "";
