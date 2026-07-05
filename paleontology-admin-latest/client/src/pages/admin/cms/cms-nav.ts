@@ -14,6 +14,7 @@ export const CMS_SECTION_META: Record<string, CmsSectionMeta> = {
   announcements: { title: "会员公告", subtitle: "发布、编辑学会及分会公告" },
   timeline: { title: "学会沿革", subtitle: "编辑历史时间线节点" },
   gallery: { title: "历史相册", subtitle: "按分类上传与管理历史照片" },
+  services: { title: "学会服务", subtitle: "统一管理科学传播、国际交流与科技奖励内容" },
   international: { title: "国际交流", subtitle: "维护交流动态、国际会议与合作机构" },
   downloads: { title: "资料下载", subtitle: "上传资料文件，可设置会员下载权限" },
   regulations: { title: "规章条例", subtitle: "编辑规章条例正文与附件" },

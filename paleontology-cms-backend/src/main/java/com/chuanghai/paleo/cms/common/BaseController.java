@@ -42,4 +42,9 @@ public abstract class BaseController {
         }
         return null;
     }
+
+    protected Long getUserId() {
+        LoginUser user = currentUser();
+        return user != null ? user.getUserId() : null;
+    }
 }

@@ -202,7 +202,7 @@ export interface CmsScienceItem {
 export interface CmsInternationalItem {
   id: string;
   title: string;
-  type: "news" | "conference" | "partner";
+  type: "news" | "conference" | "report" | "partner";
   summary: string;
   content: string;
   linkUrl: string;

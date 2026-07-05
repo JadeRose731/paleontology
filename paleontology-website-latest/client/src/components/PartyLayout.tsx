@@ -6,6 +6,7 @@ import { useCmsChannels } from "@/hooks/useCmsChannels";
 import { useSiteConfig } from "@/hooks/useSiteConfig";
 import LoginJoinDialog from "./LoginJoinDialog";
 import MembershipChoiceDialog from "./MembershipChoiceDialog";
+import MembershipApplicationDialog from "./MembershipApplicationDialog";
 
 interface PartyLayoutProps {
   children: React.ReactNode;
@@ -27,6 +28,7 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs, f
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [showChoiceDialog, setShowChoiceDialog] = useState(false);
+  const [showJoinAppDialog, setShowJoinAppDialog] = useState(false);
 
   // 首次登录且未做选择时，弹出决策对话框
   React.useEffect(() => {
@@ -38,6 +40,17 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs, f
   }, [isLoggedIn, membershipChoiceMade]);
 
   const unreadNotifs = notifications.filter(n => !n.read);
+
+  const hideJoinMemberButton = isLoggedIn && (
+    societyMembership.status === "active" ||
+    societyMembership.status === "application_submitted" ||
+    societyMembership.status === "application_approved" ||
+    societyMembership.status === "voucher_submitted" ||
+    societyMembership.status === "invoice_submitted" ||
+    societyMembership.status === "invoice_pending" ||
+    societyMembership.status === "invoice_overdue" ||
+    societyMembership.status === "pending"
+  );
 
   // Route groupings
   const isSocietyHome = location === "/";
@@ -187,16 +200,17 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs, f
                 </>
               )}
             </div>
-            {/* 加入会员按钮 - 未登录或已登录但非会员时显示，与搜索框同级 */}
-            {(!isLoggedIn || societyMembership.status !== "active") && (
+            {/* 加入会员按钮 - 未登录引导注册；已登录且未完成入会流程时弹窗申请 */}
+            {!hideJoinMemberButton && (
               <button
                 onClick={() => {
                   if (!isLoggedIn) {
                     setDialogOpenTab("register");
                     setDialogOpen(true);
+                  } else if (!membershipChoiceMade || userType === "regular") {
+                    setShowChoiceDialog(true);
                   } else {
-                    // 已登录但非会员：跳转到会员服务 Tab
-                    setLocation("/services?tab=member");
+                    setShowJoinAppDialog(true);
                   }
                 }}
                 className="flex items-center gap-1.5 bg-[#f5c842] hover:bg-[#f0bc30] text-[#002B49] font-bold text-xs px-3 py-1.5 rounded transition-colors shadow-sm whitespace-nowrap"
@@ -504,7 +518,14 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs, f
         onOpenChange={setDialogOpen}
         initialTab={dialogTab}
       />
-      <MembershipChoiceDialog open={showChoiceDialog} />
+      <MembershipChoiceDialog
+        open={showChoiceDialog}
+        onChooseMember={() => {
+          setShowChoiceDialog(false);
+          setShowJoinAppDialog(true);
+        }}
+      />
+      <MembershipApplicationDialog open={showJoinAppDialog} onOpenChange={setShowJoinAppDialog} />
     </div>
   );
 }

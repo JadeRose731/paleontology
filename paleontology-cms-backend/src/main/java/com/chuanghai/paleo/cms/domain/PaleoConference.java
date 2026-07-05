@@ -13,6 +13,8 @@ public class PaleoConference {
     @TableId(type = IdType.AUTO)
     private Long conferenceId;
     private Long associationId;
+    /** 与前端 confId 对齐，如 conf-zgswxh-1 */
+    private String conferenceCode;
     private String conferenceTitle;
     private String city;
     private Date startDate;

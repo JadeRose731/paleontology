@@ -2,7 +2,20 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { toast } from "sonner";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
-import { listCmsChannelTree } from "@/lib/cms-api";
+import { ensureCmsAuth, listCmsChannelTree } from "@/lib/cms-api";
+import {
+  fetchMemberDirectory,
+  fetchPendingApplications,
+  fetchPendingConferenceInvoices,
+  fetchPendingConferenceVouchers,
+  fetchPendingMembershipInvoices,
+  fetchPendingMembershipVouchers,
+  mapApiPaymentStatus,
+  reviewConferenceRegistration,
+  reviewMembershipApplication,
+  reviewMembershipPayment,
+  type ApiMemberDirectoryRow,
+} from "@/lib/membership-api";
 import {
   buildCmsMenuFromTree,
   buildCmsRoutePermissions,
@@ -80,11 +93,14 @@ export interface ReviewItem {
   rejectReason?: string;
   invoiceDeadline?: string;
   confId?: string;
+  paymentId?: number;
+  registrationId?: number;
 }
 
 // Phase 6: 入会申请审核
 export interface MembershipAppRecord {
   id: string;
+  applicationId: number;
   userEmail: string;
   userName: string;
   applicationFileUrl: string;
@@ -97,6 +113,7 @@ export interface MembershipAppRecord {
 // Phase 6: 退会申请审核
 export interface WithdrawalAppRecord {
   id: string;
+  applicationId: number;
   userEmail: string;
   userName: string;
   membershipStatus: string;
@@ -429,10 +446,10 @@ interface AdminContextType {
   // Phase 6: 入会/退会审核
   pendingMembershipApps: MembershipAppRecord[];
   pendingWithdrawalApps: WithdrawalAppRecord[];
-  approveMembershipApplication(userEmail: string): void;
-  rejectMembershipApplication(userEmail: string, reason: string): void;
-  approveWithdrawalApplication(userEmail: string): void;
-  rejectWithdrawalApplication(userEmail: string, reason: string): void;
+  approveMembershipApplication(applicationId: number): void;
+  rejectMembershipApplication(applicationId: number, reason: string): void;
+  approveWithdrawalApplication(applicationId: number): void;
+  rejectWithdrawalApplication(applicationId: number, reason: string): void;
   setMembershipApplicationTemplate(fileUrl: string, fileName: string): void;
   setWithdrawalApplicationTemplate(fileUrl: string, fileName: string): void;
   getMembershipApplicationTemplateUrl(): string;
@@ -570,6 +587,7 @@ const ROUTE_PERMISSIONS: Record<string, AdminRole[]> = {
   "/admin/cms/gallery": ["super_admin", "branch_admin"],
   "/admin/cms/awards": ["super_admin", "branch_admin"],
   "/admin/cms/science": ["super_admin", "branch_admin"],
+  "/admin/cms/services": ["super_admin", "branch_admin"],
   "/admin/cms/international": ["super_admin"],
   "/admin/cms/tech-rewards": ["super_admin"],
   "/admin/cms/timeline": ["super_admin"],
@@ -587,6 +605,7 @@ const BRANCH_CMS_MENU_ITEMS: MenuItem[] = [
   { path: "/admin/cms/announcements", label: "通知公告", icon: "Megaphone" },
   { path: "/admin/cms/gallery", label: "历史相册", icon: "Images" },
   { path: "/admin/cms/science", label: "科学传播", icon: "BookOpen" },
+  { path: "/admin/cms/services", label: "学会服务", icon: "Handshake" },
   { path: "/admin/cms/awards", label: "获奖成果", icon: "Award" },
   { path: "/admin/cms/downloads", label: "资料下载", icon: "Download" },
   { path: "/admin/cms/media", label: "媒体库", icon: "FolderOpen" },
@@ -633,15 +652,7 @@ const ALL_MENU_ITEMS: MenuItem[] = [
           { path: "/admin/cms/branch", label: "分会内容", icon: "Building2" },
         ],
       },
-      {
-        path: "/admin/cms-group/services",
-        label: "学会服务",
-        icon: "Handshake",
-        children: [
-          { path: "/admin/cms/science", label: "科学传播", icon: "BookOpen" },
-          { path: "/admin/cms/tech-rewards", label: "科技奖励", icon: "Trophy" },
-        ],
-      },
+      { path: "/admin/cms/services", label: "学会服务", icon: "Handshake" },
       { path: "/admin/cms/party", label: "党建文化", icon: "Flag" },
       { path: "/admin/cms/timeline", label: "学会沿革", icon: "Clock" },
       { path: "/admin/cms/gallery", label: "历史相册", icon: "Images" },
@@ -1926,6 +1937,22 @@ function seedDemoData() {
   console.log(`[Admin] Seeded demo data: ${SEED_USERS.length} users across ${Object.keys(BRANCH_MAP).length} branches`);
 }
 
+function mapDirectoryRow(row: ApiMemberDirectoryRow): MemberRecord {
+  return {
+    email: row.email,
+    name: row.userName || row.email,
+    gender: row.gender || "",
+    unit: row.unit || "",
+    role: row.roleLabel || "",
+    memberType: row.memberCategory,
+    membershipStatus: row.membershipStatus || MEMBERSHIP_STATUS.NOT_MEMBER,
+    boundBranches: Array.isArray(row.boundBranches) ? row.boundBranches : [],
+    expiryDate: row.validEndDate,
+    userType: row.userType || "regular",
+    disabled: row.membershipStatus === MEMBERSHIP_STATUS.EXPIRED,
+  };
+}
+
 // ============================================================================
 // CONTEXT
 // ============================================================================
@@ -1951,6 +1978,9 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const found = adminDb.find((a: AdminUser & { password?: string }) => a.email === storedEmail);
       if (found) {
         setAdminUser({ email: found.email, name: found.name, role: found.role, branchId: found.branchId });
+        void ensureCmsAuth().catch(() => {
+          console.warn("CMS 后端未连接，审核队列可能无法加载");
+        });
       }
     }
     const storedNotifs = localStorage.getItem("paleo_admin_notifications");
@@ -1984,6 +2014,9 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const user: AdminUser = { email: found.email, name: found.name, role: found.role, branchId: found.branchId };
       setAdminUser(user);
       localStorage.setItem("paleo_admin_current_user", user.email);
+      void ensureCmsAuth().catch(() => {
+        toast.error("无法连接 CMS 后端，审核功能可能不可用");
+      });
       toast.success(`欢迎回来，${user.name}`);
       return true;
     }
@@ -2125,205 +2158,316 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const unreadCount = notifications.filter(n => !n.read).length;
 
   // ==========================================
-  // AUDIT — Build review queues
+  // AUDIT — Build review queues (from backend API)
   // ==========================================
 
-  const buildReviewQueues = useCallback((): { vouchers: ReviewItem[]; invoices: ReviewItem[] } => {
-    const vouchers: ReviewItem[] = [];
-    const invoices: ReviewItem[] = [];
-    const allUsers: { name?: string; email: string }[] = JSON.parse(localStorage.getItem("paleo_admin_all_users") || "[]");
+  const [pendingVoucherReviews, setPendingVoucherReviews] = useState<ReviewItem[]>([]);
+  const [pendingInvoiceReviews, setPendingInvoiceReviews] = useState<ReviewItem[]>([]);
 
-    for (const u of allUsers) {
-      const email = u.email;
-      const membershipKey = `paleo_admin_society_membership_${email}`;
-      const stored = localStorage.getItem(membershipKey);
-      if (stored) {
-        const membership = JSON.parse(stored);
-        if (membership.status === MEMBERSHIP_STATUS.VOUCHER_SUBMITTED) {
-          vouchers.push(buildReviewItem(email, u, "society_fee"));
-        } else if (membership.status === MEMBERSHIP_STATUS.INVOICE_SUBMITTED) {
-          invoices.push(buildReviewItem(email, u, "society_fee"));
-        } else if (membership.status === MEMBERSHIP_STATUS.INVOICE_OVERDUE) {
-          invoices.push(buildReviewItem(email, u, "society_fee"));
-        }
-      }
+  const loadReviewQueues = useCallback(async () => {
+    try {
+      const [membershipVouchers, membershipInvoices, conferenceVouchers, conferenceInvoices] = await Promise.all([
+        fetchPendingMembershipVouchers(),
+        fetchPendingMembershipInvoices(),
+        fetchPendingConferenceVouchers(),
+        fetchPendingConferenceInvoices(),
+      ]);
 
-      const confsKey = `paleo_admin_confs_${email}`;
-      const storedConfs = localStorage.getItem(confsKey);
-      if (storedConfs) {
-        const confRegs = JSON.parse(storedConfs);
-        for (const confId of Object.keys(confRegs)) {
-          const reg = confRegs[confId];
-          if (reg.status === CONFERENCE_STATUS.VOUCHER_SUBMITTED) {
-            vouchers.push(buildReviewItem(email, u, "conference_fee", confId));
-          } else if (reg.status === CONFERENCE_STATUS.INVOICE_SUBMITTED) {
-            invoices.push(buildReviewItem(email, u, "conference_fee", confId));
-          } else if (reg.status === CONFERENCE_STATUS.INVOICE_OVERDUE) {
-            invoices.push(buildReviewItem(email, u, "conference_fee", confId));
-          }
-        }
-      }
+      const vouchers: ReviewItem[] = [
+        ...membershipVouchers.map((p) => ({
+          id: `payment-${p.paymentId}`,
+          paymentId: p.paymentId,
+          userEmail: p.userEmail || "",
+          userName: p.userName || p.userEmail || "",
+          type: "society_fee" as const,
+          targetName: "中国古生物学会会员费",
+          amount: Number(p.amount || 0),
+          voucherUrl: p.voucherUrl || "",
+          invoiceUrl: p.invoiceUrl || "",
+          submitTime: p.createTime || "",
+          status: mapApiPaymentStatus(p.paymentStatus),
+          rejectReason: p.reviewComment,
+        })),
+        ...conferenceVouchers.map((r) => ({
+          id: `registration-${r.registrationId}`,
+          registrationId: r.registrationId,
+          userEmail: r.userEmail || "",
+          userName: r.userName || r.userEmail || "",
+          type: "conference_fee" as const,
+          targetName: r.conferenceTitle || r.conferenceCode || "学术会议",
+          amount: Number(r.feeAmount || 0),
+          voucherUrl: r.voucherUrl || "",
+          invoiceUrl: r.invoiceUrl || "",
+          submitTime: r.voucherSubmitTime || "",
+          status: mapApiPaymentStatus(r.paymentStatus),
+          rejectReason: r.reviewComment,
+          invoiceDeadline: r.invoiceDeadline,
+          confId: r.conferenceCode,
+        })),
+      ];
+
+      const invoices: ReviewItem[] = [
+        ...membershipInvoices.map((p) => ({
+          id: `payment-${p.paymentId}`,
+          paymentId: p.paymentId,
+          userEmail: p.userEmail || "",
+          userName: p.userName || p.userEmail || "",
+          type: "society_fee" as const,
+          targetName: "中国古生物学会会员费",
+          amount: Number(p.amount || 0),
+          voucherUrl: p.voucherUrl || "",
+          invoiceUrl: p.invoiceUrl || "",
+          submitTime: p.updateTime || p.createTime || "",
+          status: mapApiPaymentStatus(p.paymentStatus),
+          rejectReason: p.reviewComment,
+        })),
+        ...conferenceInvoices.map((r) => ({
+          id: `registration-${r.registrationId}`,
+          registrationId: r.registrationId,
+          userEmail: r.userEmail || "",
+          userName: r.userName || r.userEmail || "",
+          type: "conference_fee" as const,
+          targetName: r.conferenceTitle || r.conferenceCode || "学术会议",
+          amount: Number(r.feeAmount || 0),
+          voucherUrl: r.voucherUrl || "",
+          invoiceUrl: r.invoiceUrl || "",
+          submitTime: r.invoiceSubmitTime || "",
+          status: mapApiPaymentStatus(r.paymentStatus),
+          rejectReason: r.reviewComment,
+          confId: r.conferenceCode,
+        })),
+      ];
+
+      setPendingVoucherReviews(vouchers);
+      setPendingInvoiceReviews(invoices);
+    } catch (e) {
+      console.error("加载审核队列失败", e);
     }
+  }, []);
 
-    return { vouchers, invoices };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshTrigger]);
+  const [pendingMembershipApps, setPendingMembershipApps] = useState<MembershipAppRecord[]>([]);
+  const [pendingWithdrawalApps, setPendingWithdrawalApps] = useState<WithdrawalAppRecord[]>([]);
+  const [apiMemberRecords, setApiMemberRecords] = useState<MemberRecord[] | null>(null);
 
-  const { vouchers: pendingVoucherReviews, invoices: pendingInvoiceReviews } = buildReviewQueues();
+  const loadMemberDirectory = useCallback(async () => {
+    try {
+      const rows = await fetchMemberDirectory();
+      setApiMemberRecords((rows ?? []).map(mapDirectoryRow));
+    } catch (e) {
+      console.error("加载用户会员目录失败", e);
+    }
+  }, []);
+
+  const loadApplicationQueues = useCallback(async () => {
+    try {
+      const [joinApps, withdrawApps] = await Promise.all([
+        fetchPendingApplications("JOIN"),
+        fetchPendingApplications("WITHDRAW"),
+      ]);
+
+      setPendingMembershipApps(
+        (joinApps ?? []).map((app) => ({
+          id: `mem-app-${app.applicationId}`,
+          applicationId: app.applicationId,
+          userEmail: app.userEmail || app.applicantEmail || "",
+          userName: app.userName || app.applicantName || app.userEmail || "",
+          applicationFileUrl: app.applicationFileUrl || "",
+          applicationFileName: "入会申请书",
+          submitTime: app.createTime || "",
+          status: MEMBERSHIP_STATUS.APPLICATION_SUBMITTED,
+        })),
+      );
+
+      setPendingWithdrawalApps(
+        (withdrawApps ?? []).map((app) => ({
+          id: `wd-app-${app.applicationId}`,
+          applicationId: app.applicationId,
+          userEmail: app.userEmail || app.applicantEmail || "",
+          userName: app.userName || app.applicantName || app.userEmail || "",
+          membershipStatus: app.memberStatus || "unknown",
+          expiryDate: app.validEndDate,
+          applicationFileUrl: app.applicationFileUrl || "",
+          applicationFileName: "退会申请书",
+          submitTime: app.createTime || "",
+          status: MEMBERSHIP_STATUS.WITHDRAWAL_SUBMITTED,
+        })),
+      );
+    } catch (e) {
+      console.error("加载入会/退会申请队列失败", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!adminUser) return;
+    loadReviewQueues();
+    loadApplicationQueues();
+    loadMemberDirectory();
+    const timer = window.setInterval(() => {
+      loadReviewQueues();
+      loadApplicationQueues();
+      loadMemberDirectory();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [adminUser, refreshTrigger, loadReviewQueues, loadApplicationQueues, loadMemberDirectory]);
 
   // ==========================================
   // AUDIT — Voucher actions
   // ==========================================
 
+  const findVoucherReviewItem = (
+    targetEmail: string,
+    type: "society_fee" | "conference_fee",
+    confId?: string,
+  ) =>
+    pendingVoucherReviews.find(
+      (item) =>
+        item.userEmail === targetEmail &&
+        item.type === type &&
+        (type === "society_fee" || item.confId === confId),
+    );
+
+  const findInvoiceReviewItem = (
+    targetEmail: string,
+    type: "society_fee" | "conference_fee",
+    confId?: string,
+  ) =>
+    pendingInvoiceReviews.find(
+      (item) =>
+        item.userEmail === targetEmail &&
+        item.type === type &&
+        (type === "society_fee" || item.confId === confId),
+    );
+
   const approveVoucher = useCallback(
     (targetEmail: string, type: "society_fee" | "conference_fee", confId?: string) => {
-      if (type === "society_fee") {
-        const key = `paleo_admin_society_membership_${targetEmail}`;
-        const stored = localStorage.getItem(key);
-        if (!stored) return;
-        const membership = JSON.parse(stored);
-        membership.status = MEMBERSHIP_STATUS.INVOICE_PENDING;
-        membership.invoiceDeadline = addWorkdays(new Date().toISOString().split("T")[0], 7);
-        localStorage.setItem(key, JSON.stringify(membership));
-        syncAdminToUserStorage(key);
-      } else if (confId) {
-        const key = `paleo_admin_confs_${targetEmail}`;
-        const stored = localStorage.getItem(key);
-        if (!stored) return;
-        const confRegs = JSON.parse(stored);
-        if (confRegs[confId]) {
-          confRegs[confId].status = CONFERENCE_STATUS.INVOICE_PENDING;
-          confRegs[confId].voucherAuditTime = new Date().toISOString();
-          confRegs[confId].invoiceDeadline = addWorkdays(new Date().toISOString().split("T")[0], 7);
-          localStorage.setItem(key, JSON.stringify(confRegs));
-          syncAdminToUserStorage(key);
+      void (async () => {
+        const item = findVoucherReviewItem(targetEmail, type, confId);
+        if (!item) {
+          toast.error("未找到待审凭证记录");
+          return;
         }
-      }
-      // Log audit
-      const log: AuditLogEntry = {
-        id: generateId(),
-        targetEmail,
-        targetName: targetEmail,
-        type,
-        action: "approve_voucher",
-        reviewer: adminUser?.email || "",
-        time: new Date().toISOString(),
-      };
-      const auditLog: AuditLogEntry[] = JSON.parse(localStorage.getItem("paleo_admin_audit_log") || "[]");
-      auditLog.push(log);
-      localStorage.setItem("paleo_admin_audit_log", JSON.stringify(auditLog));
-
-      addNotification({
-        title: "初审已通过",
-        content: `${targetEmail} 的${type === "society_fee" ? "会员费" : "会议费"}凭证初审已通过`,
-        type: "success",
-      });
-      toast.success("初审已通过，已通知用户上传发票");
-      triggerRefresh();
+        try {
+          if (item.paymentId) {
+            await reviewMembershipPayment(item.paymentId, "INVOICE_PENDING");
+          } else if (item.registrationId) {
+            await reviewConferenceRegistration(item.registrationId, "INVOICE_PENDING");
+          } else {
+            toast.error("无效审核记录");
+            return;
+          }
+          addNotification({
+            title: "初审已通过",
+            content: `${targetEmail} 的${type === "society_fee" ? "会员费" : "会议费"}凭证初审已通过`,
+            type: "success",
+          });
+          toast.success("初审已通过，已通知用户上传发票");
+          triggerRefresh();
+          await loadReviewQueues();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "审核失败");
+        }
+      })();
     },
-    [adminUser, addNotification, triggerRefresh]
+    [addNotification, triggerRefresh, pendingVoucherReviews, loadReviewQueues],
   );
 
   const rejectVoucher = useCallback(
     (targetEmail: string, type: "society_fee" | "conference_fee", reason: string, confId?: string) => {
-      if (type === "society_fee") {
-        const key = `paleo_admin_society_membership_${targetEmail}`;
-        const stored = localStorage.getItem(key);
-        if (!stored) return;
-        const membership = JSON.parse(stored);
-        membership.status = MEMBERSHIP_STATUS.VOUCHER_REJECTED;
-        membership.voucherRejectReason = reason;
-        localStorage.setItem(key, JSON.stringify(membership));
-        syncAdminToUserStorage(key);
-      } else if (confId) {
-        const key = `paleo_admin_confs_${targetEmail}`;
-        const stored = localStorage.getItem(key);
-        if (!stored) return;
-        const confRegs = JSON.parse(stored);
-        if (confRegs[confId]) {
-          confRegs[confId].status = CONFERENCE_STATUS.VOUCHER_REJECTED;
-          confRegs[confId].voucherRejectReason = reason;
-          localStorage.setItem(key, JSON.stringify(confRegs));
-          syncAdminToUserStorage(key);
+      void (async () => {
+        const item = findVoucherReviewItem(targetEmail, type, confId);
+        if (!item) {
+          toast.error("未找到待审凭证记录");
+          return;
         }
-      }
-      addNotification({
-        title: "初审已驳回",
-        content: `${targetEmail} 的凭证已被驳回，原因：${reason}`,
-        type: "warning",
-      });
-      toast.success("初审已驳回");
-      triggerRefresh();
+        try {
+          if (item.paymentId) {
+            await reviewMembershipPayment(item.paymentId, "VOUCHER_REJECTED", reason);
+          } else if (item.registrationId) {
+            await reviewConferenceRegistration(item.registrationId, "VOUCHER_REJECTED", reason);
+          } else {
+            toast.error("无效审核记录");
+            return;
+          }
+          addNotification({
+            title: "初审已驳回",
+            content: `${targetEmail} 的凭证已被驳回，原因：${reason}`,
+            type: "warning",
+          });
+          toast.success("初审已驳回");
+          triggerRefresh();
+          await loadReviewQueues();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "审核失败");
+        }
+      })();
     },
-    [addNotification, triggerRefresh]
+    [addNotification, triggerRefresh, pendingVoucherReviews, loadReviewQueues],
   );
 
   const approveInvoice = useCallback(
     (targetEmail: string, type: "society_fee" | "conference_fee", confId?: string) => {
-      if (type === "society_fee") {
-        const key = `paleo_admin_society_membership_${targetEmail}`;
-        const stored = localStorage.getItem(key);
-        if (!stored) return;
-        const membership = JSON.parse(stored);
-        membership.status = MEMBERSHIP_STATUS.ACTIVE;
-        membership.expiryDate = new Date(new Date().getFullYear(), 11, 31).toISOString().split("T")[0];
-        localStorage.setItem(key, JSON.stringify(membership));
-        syncAdminToUserStorage(key);
-      } else if (confId) {
-        const key = `paleo_admin_confs_${targetEmail}`;
-        const stored = localStorage.getItem(key);
-        if (!stored) return;
-        const confRegs = JSON.parse(stored);
-        if (confRegs[confId]) {
-          confRegs[confId].status = CONFERENCE_STATUS.CONFIRMED;
-          confRegs[confId].invoiceAuditTime = new Date().toISOString();
-          localStorage.setItem(key, JSON.stringify(confRegs));
-          syncAdminToUserStorage(key);
+      void (async () => {
+        const item = findInvoiceReviewItem(targetEmail, type, confId);
+        if (!item) {
+          toast.error("未找到待审发票记录");
+          return;
         }
-      }
-      addNotification({
-        title: "终审已通过",
-        content: `${targetEmail} 的${type === "society_fee" ? "会员费" : "会议费"}终审已通过`,
-        type: "success",
-      });
-      toast.success("终审已通过");
-      triggerRefresh();
+        try {
+          if (item.paymentId) {
+            await reviewMembershipPayment(item.paymentId, "CONFIRMED");
+          } else if (item.registrationId) {
+            await reviewConferenceRegistration(item.registrationId, "CONFIRMED");
+          } else {
+            toast.error("无效审核记录");
+            return;
+          }
+          addNotification({
+            title: "终审已通过",
+            content: `${targetEmail} 的${type === "society_fee" ? "会员费" : "会议费"}终审已通过`,
+            type: "success",
+          });
+          toast.success("终审已通过");
+          triggerRefresh();
+          await loadReviewQueues();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "审核失败");
+        }
+      })();
     },
-    [addNotification, triggerRefresh]
+    [addNotification, triggerRefresh, pendingInvoiceReviews, loadReviewQueues],
   );
 
   const rejectInvoice = useCallback(
     (targetEmail: string, type: "society_fee" | "conference_fee", reason: string, confId?: string) => {
-      if (type === "society_fee") {
-        const key = `paleo_admin_society_membership_${targetEmail}`;
-        const stored = localStorage.getItem(key);
-        if (!stored) return;
-        const membership = JSON.parse(stored);
-        membership.status = MEMBERSHIP_STATUS.INVOICE_REJECTED;
-        membership.invoiceRejectReason = reason;
-        localStorage.setItem(key, JSON.stringify(membership));
-        syncAdminToUserStorage(key);
-      } else if (confId) {
-        const key = `paleo_admin_confs_${targetEmail}`;
-        const stored = localStorage.getItem(key);
-        if (!stored) return;
-        const confRegs = JSON.parse(stored);
-        if (confRegs[confId]) {
-          confRegs[confId].status = CONFERENCE_STATUS.INVOICE_REJECTED;
-          confRegs[confId].invoiceRejectReason = reason;
-          localStorage.setItem(key, JSON.stringify(confRegs));
-          syncAdminToUserStorage(key);
+      void (async () => {
+        const item = findInvoiceReviewItem(targetEmail, type, confId);
+        if (!item) {
+          toast.error("未找到待审发票记录");
+          return;
         }
-      }
-      addNotification({
-        title: "终审已驳回",
-        content: `${targetEmail} 的发票已被驳回，原因：${reason}`,
-        type: "warning",
-      });
-      toast.success("终审已驳回");
-      triggerRefresh();
+        try {
+          if (item.paymentId) {
+            await reviewMembershipPayment(item.paymentId, "INVOICE_REJECTED", reason);
+          } else if (item.registrationId) {
+            await reviewConferenceRegistration(item.registrationId, "INVOICE_REJECTED", reason);
+          } else {
+            toast.error("无效审核记录");
+            return;
+          }
+          addNotification({
+            title: "终审已驳回",
+            content: `${targetEmail} 的发票已被驳回，原因：${reason}`,
+            type: "warning",
+          });
+          toast.success("终审已驳回");
+          triggerRefresh();
+          await loadReviewQueues();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "审核失败");
+        }
+      })();
     },
-    [addNotification, triggerRefresh]
+    [addNotification, triggerRefresh, pendingInvoiceReviews, loadReviewQueues],
   );
 
   // ==========================================
@@ -2332,50 +2476,46 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const batchApproveVoucher = useCallback(
     (ids: string[]) => {
-      const { vouchers } = buildReviewQueues();
-      const toApprove = vouchers.filter(v => ids.includes(v.id));
+      const toApprove = pendingVoucherReviews.filter((v) => ids.includes(v.id));
       for (const item of toApprove) {
         approveVoucher(item.userEmail, item.type, item.confId);
       }
       toast.success(`已批量通过 ${toApprove.length} 条初审`);
     },
-    [buildReviewQueues, approveVoucher]
+    [pendingVoucherReviews, approveVoucher],
   );
 
   const batchRejectVoucher = useCallback(
     (ids: string[], reason: string) => {
-      const { vouchers } = buildReviewQueues();
-      const toReject = vouchers.filter(v => ids.includes(v.id));
+      const toReject = pendingVoucherReviews.filter((v) => ids.includes(v.id));
       for (const item of toReject) {
         rejectVoucher(item.userEmail, item.type, reason, item.confId);
       }
       toast.success(`已批量驳回 ${toReject.length} 条初审`);
     },
-    [buildReviewQueues, rejectVoucher]
+    [pendingVoucherReviews, rejectVoucher],
   );
 
   const batchApproveInvoice = useCallback(
     (ids: string[]) => {
-      const { invoices } = buildReviewQueues();
-      const toApprove = invoices.filter(v => ids.includes(v.id));
+      const toApprove = pendingInvoiceReviews.filter((v) => ids.includes(v.id));
       for (const item of toApprove) {
         approveInvoice(item.userEmail, item.type, item.confId);
       }
       toast.success(`已批量通过 ${toApprove.length} 条终审`);
     },
-    [buildReviewQueues, approveInvoice]
+    [pendingInvoiceReviews, approveInvoice],
   );
 
   const batchRejectInvoice = useCallback(
     (ids: string[], reason: string) => {
-      const { invoices } = buildReviewQueues();
-      const toReject = invoices.filter(v => ids.includes(v.id));
+      const toReject = pendingInvoiceReviews.filter((v) => ids.includes(v.id));
       for (const item of toReject) {
         rejectInvoice(item.userEmail, item.type, reason, item.confId);
       }
       toast.success(`已批量驳回 ${toReject.length} 条终审`);
     },
-    [buildReviewQueues, rejectInvoice]
+    [pendingInvoiceReviews, rejectInvoice],
   );
 
   const extendDeadline = useCallback(
@@ -2417,33 +2557,35 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // ==========================================
 
   const getAllMembers = useCallback((filters?: MemberFilter): MemberRecord[] => {
-    const allUsers: { email: string; name?: string; gender?: string; unit?: string; role?: string; memberType?: string }[] =
-      JSON.parse(localStorage.getItem("paleo_admin_all_users") || "[]");
+    const members: MemberRecord[] = apiMemberRecords ?? (() => {
+      const allUsers: { email: string; name?: string; gender?: string; unit?: string; role?: string; memberType?: string }[] =
+        JSON.parse(localStorage.getItem("paleo_admin_all_users") || "[]");
 
-    const members: MemberRecord[] = allUsers.map(u => {
-      const key = `paleo_admin_society_membership_${u.email}`;
-      const stored = localStorage.getItem(key);
-      const membership = stored ? JSON.parse(stored) : { status: "not_member", history: [] };
-      const branchesKey = `paleo_admin_bound_branches_${u.email}`;
-      const storedBranches = localStorage.getItem(branchesKey);
-      const boundBranches: string[] = storedBranches ? JSON.parse(storedBranches) : [];
-      const typeKey = `paleo_admin_user_type_${u.email}`;
-      const userType = localStorage.getItem(typeKey) || "regular";
+      return allUsers.map(u => {
+        const key = `paleo_admin_society_membership_${u.email}`;
+        const stored = localStorage.getItem(key);
+        const membership = stored ? JSON.parse(stored) : { status: "not_member", history: [] };
+        const branchesKey = `paleo_admin_bound_branches_${u.email}`;
+        const storedBranches = localStorage.getItem(branchesKey);
+        const boundBranches: string[] = storedBranches ? JSON.parse(storedBranches) : [];
+        const typeKey = `paleo_admin_user_type_${u.email}`;
+        const userType = localStorage.getItem(typeKey) || "regular";
 
-      return {
-        email: u.email,
-        name: u.name || "",
-        gender: u.gender || "",
-        unit: u.unit || "",
-        role: u.role || "",
-        memberType: u.memberType,
-        membershipStatus: membership.status || "not_member",
-        boundBranches: Array.isArray(boundBranches) ? boundBranches : [],
-        expiryDate: membership.expiryDate,
-        userType,
-        disabled: membership.status === MEMBERSHIP_STATUS.EXPIRED,
-      };
-    });
+        return {
+          email: u.email,
+          name: u.name || "",
+          gender: u.gender || "",
+          unit: u.unit || "",
+          role: u.role || "",
+          memberType: u.memberType,
+          membershipStatus: membership.status || "not_member",
+          boundBranches: Array.isArray(boundBranches) ? boundBranches : [],
+          expiryDate: membership.expiryDate,
+          userType,
+          disabled: membership.status === MEMBERSHIP_STATUS.EXPIRED,
+        };
+      });
+    })();
 
     // Phase 1: 分会管理员数据权限隔离
     let filtered = filterMembersByBranchScope(members, adminRole, adminBranchId);
@@ -2458,7 +2600,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       filtered = filtered.filter(m => m.boundBranches.includes(filters.branchId!));
     }
     return filtered;
-  }, [adminRole, adminBranchId]);
+  }, [apiMemberRecords, adminRole, adminBranchId]);
 
   const getMemberDetail = useCallback((email: string): MemberDetail | null => {
     const members = getAllMembers();
@@ -2606,7 +2748,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getDashboardStats = useCallback((): DashboardStats => {
     const members = getAllMembers();
-    const { vouchers, invoices } = buildReviewQueues();
+    const vouchers = pendingVoucherReviews;
+    const invoices = pendingInvoiceReviews;
     const confs = getAllConferences();
     // Phase 1: 分会管理员只看本分会数据
     const branchCounts = Object.entries(ALL_SOCIETY_UNITS)
@@ -2631,12 +2774,12 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       branchMemberCounts: branchCounts,
       paymentTrend: buildPaymentTrend(),
     };
-  }, [getAllMembers, buildReviewQueues, getAllConferences, adminRole, adminBranchId]);
+  }, [getAllMembers, pendingVoucherReviews, pendingInvoiceReviews, getAllConferences, adminRole, adminBranchId]);
 
   const getBranchDashboardStats = useCallback((branchId: string): BranchDashboardStats => {
     const confs = getAllConferences().filter(c => c.branchId === branchId);
     const members = getAllMembers().filter(m => m.boundBranches.includes(branchId));
-    const { vouchers } = buildReviewQueues();
+    const vouchers = pendingVoucherReviews;
     const branchConfIds = new Set(confs.map(c => c.id));
 
     let branchRegistrations = 0;
@@ -2670,10 +2813,11 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       branchUserCount: members.length,
       recentRegistrations: recentRegistrations.slice(0, 10),
     };
-  }, [getAllConferences, getAllMembers, buildReviewQueues]);
+  }, [getAllConferences, getAllMembers, pendingVoucherReviews]);
 
   const getFinanceDashboardStats = useCallback((): FinanceDashboardStats => {
-    const { vouchers, invoices } = buildReviewQueues();
+    const vouchers = pendingVoucherReviews;
+    const invoices = pendingInvoiceReviews;
     const auditLog: AuditLogEntry[] = JSON.parse(localStorage.getItem("paleo_admin_audit_log") || "[]");
     const today = new Date().toISOString().split("T")[0];
     const todayActions = auditLog.filter(l => l.time.startsWith(today));
@@ -2686,7 +2830,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       invoicePassRate: 0,
       recentReviews: [...vouchers, ...invoices].slice(0, 10),
     };
-  }, [buildReviewQueues]);
+  }, [pendingVoucherReviews, pendingInvoiceReviews]);
 
   // Phase 3: Global statistics（基于实收记录聚合）
   const getGlobalStats = useCallback((): GlobalStats => {
@@ -2700,25 +2844,27 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const studentNonMembers = nonMemberUsers.filter(m => m.role === "学生").length;
     const nonStudentNonMembers = nonMemberUsers.filter(m => m.role !== "学生").length;
 
-    const allUsers: { email: string; role?: string }[] = JSON.parse(localStorage.getItem("paleo_admin_all_users") || "[]");
     let studentMembershipFeeCount = 0;
     let studentMembershipFeeAmount = 0;
     let nonStudentMembershipFeeCount = 0;
     let nonStudentMembershipFeeAmount = 0;
 
-    for (const u of allUsers) {
-      const stored = localStorage.getItem(`paleo_admin_society_membership_${u.email}`);
-      if (!stored) continue;
-      const membership = JSON.parse(stored);
-      for (const h of (membership.history || [])) {
-        if (!MEMBERSHIP_REVENUE_STATUSES.has(h.status)) continue;
-        const isStudent = u.role === "学生" || (h.amount ?? 0) <= 100;
-        if (isStudent) {
-          studentMembershipFeeCount += 1;
-          studentMembershipFeeAmount += h.amount || 100;
-        } else {
-          nonStudentMembershipFeeCount += 1;
-          nonStudentMembershipFeeAmount += h.amount || 200;
+    if (!apiMemberRecords) {
+      const allUsers: { email: string; role?: string }[] = JSON.parse(localStorage.getItem("paleo_admin_all_users") || "[]");
+      for (const u of allUsers) {
+        const stored = localStorage.getItem(`paleo_admin_society_membership_${u.email}`);
+        if (!stored) continue;
+        const membership = JSON.parse(stored);
+        for (const h of (membership.history || [])) {
+          if (!MEMBERSHIP_REVENUE_STATUSES.has(h.status)) continue;
+          const isStudent = u.role === "学生" || (h.amount ?? 0) <= 100;
+          if (isStudent) {
+            studentMembershipFeeCount += 1;
+            studentMembershipFeeAmount += h.amount || 100;
+          } else {
+            nonStudentMembershipFeeCount += 1;
+            nonStudentMembershipFeeAmount += h.amount || 200;
+          }
         }
       }
     }
@@ -2762,7 +2908,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       perSocietyConferenceFee,
       perSocietyFeeBreakdown,
     };
-  }, [getAllMembers, getAllConferences]);
+  }, [getAllMembers, getAllConferences, apiMemberRecords]);
 
   // Phase 3: Per-society statistics（基于实收报名记录 + 绑定注册会员）
   const getSocietyStats = useCallback((societyId: string): SocietyStats => {
@@ -3169,251 +3315,103 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // PHASE 6: MEMBERSHIP APPLICATION & WITHDRAWAL REVIEW
   // ==========================================
 
-  const buildMembershipAppQueue = useCallback((): MembershipAppRecord[] => {
-    const apps: MembershipAppRecord[] = [];
-    const allUsers: { name?: string; email: string }[] = JSON.parse(localStorage.getItem("paleo_admin_all_users") || "[]");
+  const findMembershipApp = (applicationId: number) =>
+    pendingMembershipApps.find((app) => app.applicationId === applicationId);
 
-    for (const u of allUsers) {
-      const email = u.email;
-      const appKey = `paleo_admin_membership_application_${email}`;
-      const stored = localStorage.getItem(appKey);
-      if (!stored) continue;
-      const app = JSON.parse(stored);
-      if (app.status === MEMBERSHIP_STATUS.APPLICATION_SUBMITTED) {
-        apps.push({
-          id: `mem-app-${email}`,
-          userEmail: email,
-          userName: u.name || email,
-          applicationFileUrl: app.applicationFileUrl || "",
-          applicationFileName: app.applicationFileName || "入会申请书",
-          submitTime: app.submitTime || "",
-          status: app.status,
-        });
+  const findWithdrawalApp = (applicationId: number) =>
+    pendingWithdrawalApps.find((app) => app.applicationId === applicationId);
+
+  const approveMembershipApplication = useCallback((applicationId: number) => {
+    void (async () => {
+      const app = findMembershipApp(applicationId);
+      if (!app) {
+        toast.error("未找到该入会申请");
+        return;
       }
-    }
-    return apps;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshTrigger]);
-
-  const buildWithdrawalAppQueue = useCallback((): WithdrawalAppRecord[] => {
-    const apps: WithdrawalAppRecord[] = [];
-    const allUsers: { name?: string; email: string }[] = JSON.parse(localStorage.getItem("paleo_admin_all_users") || "[]");
-
-    for (const u of allUsers) {
-      const email = u.email;
-      const appKey = `paleo_admin_withdrawal_application_${email}`;
-      const stored = localStorage.getItem(appKey);
-      if (!stored) continue;
-      const app = JSON.parse(stored);
-      if (app.status === MEMBERSHIP_STATUS.WITHDRAWAL_SUBMITTED) {
-        // Get membership info
-        const membershipKey = `paleo_admin_society_membership_${email}`;
-        const storedMembership = localStorage.getItem(membershipKey);
-        const membership = storedMembership ? JSON.parse(storedMembership) : { status: "unknown", expiryDate: undefined };
-
-        apps.push({
-          id: `wd-app-${email}`,
-          userEmail: email,
-          userName: u.name || email,
-          membershipStatus: membership.status || "unknown",
-          expiryDate: membership.expiryDate,
-          applicationFileUrl: app.applicationFileUrl || "",
-          applicationFileName: app.applicationFileName || "退会申请书",
-          submitTime: app.submitTime || "",
-          status: app.status,
+      try {
+        await reviewMembershipApplication(applicationId, "APPROVED");
+        addNotification({
+          title: "入会申请已通过",
+          content: `${app.userEmail} 的入会申请书已审核通过`,
+          type: "success",
         });
+        toast.success("入会申请已通过，用户可进入缴费阶段");
+        triggerRefresh();
+        await loadApplicationQueues();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "审核失败");
       }
-    }
-    return apps;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshTrigger]);
+    })();
+  }, [addNotification, triggerRefresh, pendingMembershipApps, loadApplicationQueues]);
 
-  const pendingMembershipApps = buildMembershipAppQueue();
-  const pendingWithdrawalApps = buildWithdrawalAppQueue();
+  const rejectMembershipApplication = useCallback((applicationId: number, reason: string) => {
+    void (async () => {
+      const app = findMembershipApp(applicationId);
+      if (!app) {
+        toast.error("未找到该入会申请");
+        return;
+      }
+      try {
+        await reviewMembershipApplication(applicationId, "REJECTED", reason);
+        addNotification({
+          title: "入会申请已驳回",
+          content: `${app.userEmail} 的入会申请书已被驳回，原因：${reason}`,
+          type: "warning",
+        });
+        toast.success("入会申请已驳回");
+        triggerRefresh();
+        await loadApplicationQueues();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "审核失败");
+      }
+    })();
+  }, [addNotification, triggerRefresh, pendingMembershipApps, loadApplicationQueues]);
 
-  const approveMembershipApplication = useCallback((userEmail: string) => {
-    const appKey = `paleo_admin_membership_application_${userEmail}`;
-    const stored = localStorage.getItem(appKey);
-    if (!stored) { toast.error("未找到该入会申请"); return; }
-    const app = JSON.parse(stored);
-    app.status = MEMBERSHIP_STATUS.APPLICATION_APPROVED;
-    app.reviewTime = new Date().toISOString();
-    localStorage.setItem(appKey, JSON.stringify(app));
+  const approveWithdrawalApplication = useCallback((applicationId: number) => {
+    void (async () => {
+      const app = findWithdrawalApp(applicationId);
+      if (!app) {
+        toast.error("未找到该退会申请");
+        return;
+      }
+      try {
+        await reviewMembershipApplication(applicationId, "APPROVED");
+        addNotification({
+          title: "退会申请已通过",
+          content: `${app.userEmail} 的退会申请已通过，会员资格已终止`,
+          type: "info",
+        });
+        toast.success("退会申请已通过");
+        triggerRefresh();
+        await loadApplicationQueues();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "审核失败");
+      }
+    })();
+  }, [addNotification, triggerRefresh, pendingWithdrawalApps, loadApplicationQueues]);
 
-    // 同步更新会员状态为待缴费
-    const membershipKey = `paleo_admin_society_membership_${userEmail}`;
-    const membershipStored = localStorage.getItem(membershipKey);
-    const membership = membershipStored ? JSON.parse(membershipStored) : { status: "not_member", history: [] };
-    membership.status = MEMBERSHIP_STATUS.APPLICATION_APPROVED;
-    localStorage.setItem(membershipKey, JSON.stringify(membership));
-
-    // 同步用户前台 localStorage（使用 paleo_ 前缀）
-    const userAppKey = `paleo_membership_application_${userEmail}`;
-    const userStoredApp = localStorage.getItem(userAppKey);
-    if (userStoredApp) {
-      const userApp = JSON.parse(userStoredApp);
-      userApp.status = MEMBERSHIP_STATUS.APPLICATION_APPROVED;
-      userApp.reviewTime = new Date().toISOString();
-      localStorage.setItem(userAppKey, JSON.stringify(userApp));
-    }
-    const userMembershipKey = `paleo_society_membership_${userEmail}`;
-    const userStoredMem = localStorage.getItem(userMembershipKey);
-    if (userStoredMem) {
-      const userMem = JSON.parse(userStoredMem);
-      userMem.status = MEMBERSHIP_STATUS.APPLICATION_APPROVED;
-      localStorage.setItem(userMembershipKey, JSON.stringify(userMem));
-    }
-
-    addNotification({
-      title: "入会申请已通过",
-      content: `${userEmail} 的入会申请书已审核通过`,
-      type: "success",
-    });
-    toast.success("入会申请已通过，用户可进入缴费阶段");
-    triggerRefresh();
-  }, [addNotification, triggerRefresh]);
-
-  const rejectMembershipApplication = useCallback((userEmail: string, reason: string) => {
-    const appKey = `paleo_admin_membership_application_${userEmail}`;
-    const stored = localStorage.getItem(appKey);
-    if (!stored) { toast.error("未找到该入会申请"); return; }
-    const app = JSON.parse(stored);
-    app.status = MEMBERSHIP_STATUS.APPLICATION_REJECTED;
-    app.rejectReason = reason;
-    app.reviewTime = new Date().toISOString();
-    localStorage.setItem(appKey, JSON.stringify(app));
-
-    // 同步更新会员状态
-    const membershipKey = `paleo_admin_society_membership_${userEmail}`;
-    const membershipStored = localStorage.getItem(membershipKey);
-    const membership = membershipStored ? JSON.parse(membershipStored) : { status: "not_member", history: [] };
-    membership.status = MEMBERSHIP_STATUS.APPLICATION_REJECTED;
-    membership.applicationRejectReason = reason;
-    localStorage.setItem(membershipKey, JSON.stringify(membership));
-
-    // 同步用户前台
-    const userAppKey = `paleo_membership_application_${userEmail}`;
-    const userStoredApp = localStorage.getItem(userAppKey);
-    if (userStoredApp) {
-      const userApp = JSON.parse(userStoredApp);
-      userApp.status = MEMBERSHIP_STATUS.APPLICATION_REJECTED;
-      userApp.rejectReason = reason;
-      userApp.reviewTime = new Date().toISOString();
-      localStorage.setItem(userAppKey, JSON.stringify(userApp));
-    }
-    const userMembershipKey = `paleo_society_membership_${userEmail}`;
-    const userStoredMem = localStorage.getItem(userMembershipKey);
-    if (userStoredMem) {
-      const userMem = JSON.parse(userStoredMem);
-      userMem.status = MEMBERSHIP_STATUS.APPLICATION_REJECTED;
-      userMem.applicationRejectReason = reason;
-      localStorage.setItem(userMembershipKey, JSON.stringify(userMem));
-    }
-
-    addNotification({
-      title: "入会申请已驳回",
-      content: `${userEmail} 的入会申请书已被驳回，原因：${reason}`,
-      type: "warning",
-    });
-    toast.success("入会申请已驳回");
-    triggerRefresh();
-  }, [addNotification, triggerRefresh]);
-
-  const approveWithdrawalApplication = useCallback((userEmail: string) => {
-    const appKey = `paleo_admin_withdrawal_application_${userEmail}`;
-    const stored = localStorage.getItem(appKey);
-    if (!stored) { toast.error("未找到该退会申请"); return; }
-    const app = JSON.parse(stored);
-    app.status = MEMBERSHIP_STATUS.WITHDRAWN;
-    app.reviewTime = new Date().toISOString();
-    localStorage.setItem(appKey, JSON.stringify(app));
-
-    // 同步更新会员状态为已退会
-    const membershipKey = `paleo_admin_society_membership_${userEmail}`;
-    const membershipStored = localStorage.getItem(membershipKey);
-    if (membershipStored) {
-      const membership = JSON.parse(membershipStored);
-      membership.status = MEMBERSHIP_STATUS.WITHDRAWN;
-      localStorage.setItem(membershipKey, JSON.stringify(membership));
-    }
-
-    // 同步用户前台
-    const userAppKey = `paleo_withdrawal_application_${userEmail}`;
-    const userStoredApp = localStorage.getItem(userAppKey);
-    if (userStoredApp) {
-      const userApp = JSON.parse(userStoredApp);
-      userApp.status = MEMBERSHIP_STATUS.WITHDRAWN;
-      userApp.reviewTime = new Date().toISOString();
-      localStorage.setItem(userAppKey, JSON.stringify(userApp));
-    }
-    const userMembershipKey = `paleo_society_membership_${userEmail}`;
-    const userStoredMem = localStorage.getItem(userMembershipKey);
-    if (userStoredMem) {
-      const userMem = JSON.parse(userStoredMem);
-      userMem.status = MEMBERSHIP_STATUS.WITHDRAWN;
-      localStorage.setItem(userMembershipKey, JSON.stringify(userMem));
-    }
-
-    // 将用户类型改为非会员
-    const userTypeKey = `paleo_admin_user_type_${userEmail}`;
-    localStorage.setItem(userTypeKey, "non_member");
-    const userTypeKeyUser = `paleo_user_type_${userEmail}`;
-    localStorage.setItem(userTypeKeyUser, "non_member");
-
-    addNotification({
-      title: "退会申请已通过",
-      content: `${userEmail} 的退会申请已通过，会员资格已终止`,
-      type: "info",
-    });
-    toast.success("退会申请已通过");
-    triggerRefresh();
-  }, [addNotification, triggerRefresh]);
-
-  const rejectWithdrawalApplication = useCallback((userEmail: string, reason: string) => {
-    const appKey = `paleo_admin_withdrawal_application_${userEmail}`;
-    const stored = localStorage.getItem(appKey);
-    if (!stored) { toast.error("未找到该退会申请"); return; }
-    const app = JSON.parse(stored);
-    app.status = MEMBERSHIP_STATUS.WITHDRAWAL_REJECTED;
-    app.rejectReason = reason;
-    app.reviewTime = new Date().toISOString();
-    localStorage.setItem(appKey, JSON.stringify(app));
-
-    // 恢复会员状态为 active
-    const membershipKey = `paleo_admin_society_membership_${userEmail}`;
-    const membershipStored = localStorage.getItem(membershipKey);
-    if (membershipStored) {
-      const membership = JSON.parse(membershipStored);
-      membership.status = MEMBERSHIP_STATUS.ACTIVE;
-      localStorage.setItem(membershipKey, JSON.stringify(membership));
-    }
-
-    // 同步用户前台
-    const userAppKey = `paleo_withdrawal_application_${userEmail}`;
-    const userStoredApp = localStorage.getItem(userAppKey);
-    if (userStoredApp) {
-      const userApp = JSON.parse(userStoredApp);
-      userApp.status = MEMBERSHIP_STATUS.WITHDRAWAL_REJECTED;
-      userApp.rejectReason = reason;
-      userApp.reviewTime = new Date().toISOString();
-      localStorage.setItem(userAppKey, JSON.stringify(userApp));
-    }
-    const userMembershipKey = `paleo_society_membership_${userEmail}`;
-    const userStoredMem = localStorage.getItem(userMembershipKey);
-    if (userStoredMem) {
-      const userMem = JSON.parse(userStoredMem);
-      userMem.status = MEMBERSHIP_STATUS.ACTIVE;
-      localStorage.setItem(userMembershipKey, JSON.stringify(userMem));
-    }
-
-    addNotification({
-      title: "退会申请已驳回",
-      content: `${userEmail} 的退会申请已被驳回，原因：${reason}`,
-      type: "warning",
-    });
-    toast.success("退会申请已驳回");
-    triggerRefresh();
-  }, [addNotification, triggerRefresh]);
+  const rejectWithdrawalApplication = useCallback((applicationId: number, reason: string) => {
+    void (async () => {
+      const app = findWithdrawalApp(applicationId);
+      if (!app) {
+        toast.error("未找到该退会申请");
+        return;
+      }
+      try {
+        await reviewMembershipApplication(applicationId, "REJECTED", reason);
+        addNotification({
+          title: "退会申请已驳回",
+          content: `${app.userEmail} 的退会申请已被驳回，原因：${reason}`,
+          type: "warning",
+        });
+        toast.success("退会申请已驳回");
+        triggerRefresh();
+        await loadApplicationQueues();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "审核失败");
+      }
+    })();
+  }, [addNotification, triggerRefresh, pendingWithdrawalApps, loadApplicationQueues]);
 
   // 模板管理
   const setMembershipApplicationTemplateAction = useCallback((fileUrl: string, fileName: string) => {

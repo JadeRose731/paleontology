@@ -1,11 +1,66 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import PartyLayout from "../components/PartyLayout";
 import { Link, useLocation } from "wouter";
 import { useMembership } from "../contexts/MembershipContext";
 import { toast } from "sonner";
 import LoginJoinDialog from "../components/LoginJoinDialog";
+import { CmsRichTextBody } from "@/components/CmsPageHeader";
+import { useCmsEntries } from "@/hooks/useCmsEntries";
+import { useServiceCategories } from "@/hooks/useServiceCategories";
+import { formatDate, type ApiCmsEntry } from "@/lib/cms-api";
+import type { ServiceContentModule } from "@/lib/services-categories";
 import { pickAndReadFile, type UploadedFile } from "../lib/fileUpload";
 import { CONFERENCE_STATUS_LABEL, CONFERENCE_STATUS_COLOR, CONFERENCE_STATUS, getConferenceFeeConfig as getConfiguredFeeConfig, type ConferenceFeeConfig, CONFERENCE_FEE_TYPE_LABEL, type ConferenceFeeType, ALL_SOCIETY_UNITS, TOTAL_SOCIETY_ID, TOTAL_SOCIETY_INTRO, TOTAL_SOCIETY_TAGS, TOTAL_SOCIETY_MEETINGS, isSocietyAccessible, isDeadlinePassed, sortConferencesSocietyFirst, ACCOMMODATION_TYPE_LABEL, type AccommodationType, FIELD_TRIP_PHASE_LABEL, type FieldTripRoute, type FieldTripSelections, createEmptyFieldTripSelections, createDefaultFieldTripRoutes, canSelectFieldTripRoute, validateFieldTripSelections, FIELD_TRIP_GENDER_RESTRICTION_LABEL } from "@shared/constants";
+
+const SCIENCE_FORMAT_LABELS: Record<string, string> = {
+  article: "科普动态",
+  video: "科普视频",
+  base: "科普基地",
+  book: "科普期刊",
+  fossil: "化石保护与利用",
+};
+
+const SCIENCE_FORMAT_ORDER = ["article", "video", "base", "book", "fossil"] as const;
+
+const INTL_NAV = [
+  { code: "news", label: "交流动态" },
+  { code: "conference", label: "国际会议" },
+  { code: "report", label: "重要报告" },
+  { code: "partner", label: "合作机构" },
+] as const;
+
+const INTL_TYPE_LABELS: Record<string, string> = {
+  news: "交流动态",
+  conference: "国际会议",
+  report: "重要报告",
+  partner: "合作机构",
+};
+
+const INTL_TYPE_ICONS: Record<string, string> = {
+  news: "public",
+  report: "description",
+  conference: "groups",
+  partner: "handshake",
+};
+
+const AWARD_CARD_STYLES = [
+  { icon: "star", color: "bg-yellow-50 border-yellow-200" },
+  { icon: "trending_up", color: "bg-blue-50 border-blue-200" },
+  { icon: "description", color: "bg-green-50 border-green-200" },
+  { icon: "campaign", color: "bg-purple-50 border-purple-200" },
+];
+
+const CMS_TAB_ICONS: Record<ServiceContentModule, string> = {
+  science: "campaign",
+  international: "public",
+  "tech-rewards": "workspace_premium",
+};
+
+const FALLBACK_CMS_SERVICE_TABS = [
+  { navName: "国际交流", websiteTabKey: "international", contentModule: "international" as ServiceContentModule, subtitle: "外事手续指导、国际会议组织申报及国际合作机构联络。" },
+  { navName: "科学传播", websiteTabKey: "science", contentModule: "science" as ServiceContentModule, subtitle: "科普文章、视频、基地与化石保护等内容。" },
+  { navName: "科技奖励", websiteTabKey: "awards", contentModule: "tech-rewards" as ServiceContentModule, subtitle: "奖项介绍与申报指南。" },
+];
 
 const BRANCH_SERVICES_ID_MAP: Record<string, string> = {
   gwjz: "gwjzdwxfh",
@@ -32,18 +87,6 @@ export default function Services() {
     submitConferenceForm,
     deleteAbstract,
     uploadAbstract,
-    simApproveSocietyMembership,
-    simRejectSocietyMembership,
-    simApproveSocietyVoucher,
-    simRejectSocietyVoucher,
-    simApproveSocietyInvoice,
-    simRejectSocietyInvoice,
-    simApproveConference,
-    simRejectConference,
-    simApproveConferenceVoucher,
-    simRejectConferenceVoucher,
-    simApproveConferenceInvoice,
-    simRejectConferenceInvoice,
     getMembershipFee,
     userType,
     membershipChoiceMade,
@@ -63,27 +106,63 @@ export default function Services() {
     membershipApplication,
     submitMembershipApplication,
     cancelMembershipApplication,
-    simApproveMembershipApplication,
-    simRejectMembershipApplication,
     getMembershipApplicationTemplateUrl,
   } = useMembership();
 
   // Parse URL query parameter for tab selection (e.g. /services?tab=member)
-  const [activeTab, setActiveTab] = useState<"branches" | "member" | "conference" | "international" | "science" | "awards" | "main">("main");
+  const [activeTab, setActiveTab] = useState<string>("main");
   const [conferenceBranchFilter, setConferenceBranchFilter] = useState<string | null>(null);
   const [noticePreviewConfId, setNoticePreviewConfId] = useState<string | null>(null);
+  const [scienceFormat, setScienceFormat] = useState<string>("all");
+  const [intlTypeFilter, setIntlTypeFilter] = useState<string>("all");
+
+  const { items: scienceCmsItems, loading: scienceLoading } = useCmsEntries({ moduleCode: "science" });
+  const { items: intlCmsItems, loading: intlLoading } = useCmsEntries({ moduleCode: "international" });
+  const { items: techCmsItems, loading: techLoading } = useCmsEntries({ moduleCode: "tech-rewards" });
+
+  const filteredScienceItems = useMemo(() => {
+    if (scienceFormat === "all") return scienceCmsItems;
+    return scienceCmsItems.filter(i => (i.columnCode ?? "article") === scienceFormat);
+  }, [scienceCmsItems, scienceFormat]);
+
+  const filteredIntlItems = useMemo(() => {
+    if (intlTypeFilter === "all") return intlCmsItems;
+    return intlCmsItems.filter(i => (i.columnCode ?? "news") === intlTypeFilter);
+  }, [intlCmsItems, intlTypeFilter]);
+
+  const intlPartnerItems = useMemo(
+    () => intlCmsItems.filter(i => (i.columnCode ?? "news") === "partner"),
+    [intlCmsItems],
+  );
+
+  const techIntroItems = useMemo(
+    () => techCmsItems.filter(i => (i.columnCode ?? "intro") === "intro"),
+    [techCmsItems],
+  );
+
+  const techGuideItems = useMemo(
+    () => techCmsItems.filter(i => (i.columnCode ?? "guide") === "guide"),
+    [techCmsItems],
+  );
+
+  const { categories: cmsServiceCategories } = useServiceCategories();
+  const cmsServiceTabs = cmsServiceCategories.length > 0 ? cmsServiceCategories : FALLBACK_CMS_SERVICE_TABS;
+
+  const activeCmsCategory = cmsServiceTabs.find(c => c.websiteTabKey === activeTab);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get("tab");
-    if (tabParam && ["branches", "member", "conference", "international", "science", "awards", "main"].includes(tabParam)) {
-      setActiveTab(tabParam as any);
+    const cmsTabKeys = cmsServiceTabs.map(c => c.websiteTabKey);
+    const validTabs = ["branches", "member", "conference", "main", ...cmsTabKeys];
+    if (tabParam && validTabs.includes(tabParam)) {
+      setActiveTab(tabParam);
     }
     const branchParam = params.get("branch");
     if (branchParam) {
       setConferenceBranchFilter(branchParam);
     }
-  }, [location]);
+  }, [location, cmsServiceTabs]);
 
   // Dialog & Flow States
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -120,8 +199,6 @@ export default function Services() {
   });
 
   // Simulator state
-  const [simConfId, setSimConfId] = useState("conf-1");
-  const [simRejectReason, setSimRejectReason] = useState("上传的銀行汇款回单模糊，无法辨认汇款人和金额，请重新拍摄。");
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   // Member fee payment flow
   const [memberPayStep, setMemberPayStep] = useState(1);
@@ -379,8 +456,8 @@ export default function Services() {
               <button onClick={() => setActiveTab("branches")} className="bg-[#002B49] hover:bg-[#001f35] text-white px-8 py-3 rounded-lg font-bold text-sm transition-all shadow-md flex items-center gap-2">
                 <span className="material-symbols-outlined text-sm">account_tree</span> 专业分会
               </button>
-              <button onClick={() => setActiveTab("international")} className="border border-[#002B49] text-[#002B49] hover:bg-slate-50 px-8 py-3 rounded-lg font-bold text-sm transition-all">
-                国际交流
+              <button onClick={() => setActiveTab(cmsServiceTabs[0]?.websiteTabKey ?? "international")} className="border border-[#002B49] text-[#002B49] hover:bg-slate-50 px-8 py-3 rounded-lg font-bold text-sm transition-all">
+                {cmsServiceTabs[0]?.navName ?? "国际交流"}
               </button>
             </div>
           </div>
@@ -420,33 +497,20 @@ export default function Services() {
               <p className="text-xs text-slate-500 mb-4 leading-relaxed">浏览各分会发布的学术会议，在线报名、缴纳注册费、上传摘要并填写参会信息。</p>
               <span className="flex items-center text-[#715a3e] font-bold text-xs tracking-widest">浏览会议 <span className="material-symbols-outlined ml-1 text-sm">arrow_forward</span></span>
             </div>
-            {/* 国际交流 */}
-            <div onClick={() => setActiveTab("international")} className="bg-white border-t-4 border-[#002B49] border-x border-b border-[#E5E1DA] p-6 hover:-translate-y-1 hover:shadow-lg transition-all duration-300 cursor-pointer group rounded-b-lg">
-              <div className="bg-slate-100 w-12 h-12 flex items-center justify-center rounded-lg mb-4 group-hover:bg-[#002B49] transition-colors">
-                <span className="material-symbols-outlined text-[#002B49] group-hover:text-white">public</span>
+            {cmsServiceTabs.map(cat => (
+              <div
+                key={cat.websiteTabKey}
+                onClick={() => setActiveTab(cat.websiteTabKey)}
+                className="bg-white border-t-4 border-[#002B49] border-x border-b border-[#E5E1DA] p-6 hover:-translate-y-1 hover:shadow-lg transition-all duration-300 cursor-pointer group rounded-b-lg"
+              >
+                <div className="bg-slate-100 w-12 h-12 flex items-center justify-center rounded-lg mb-4 group-hover:bg-[#002B49] transition-colors">
+                  <span className="material-symbols-outlined text-[#002B49] group-hover:text-white">{CMS_TAB_ICONS[cat.contentModule]}</span>
+                </div>
+                <h3 className="font-bold text-lg text-[#002B49] mb-2">{cat.navName}</h3>
+                <p className="text-xs text-slate-500 mb-4 leading-relaxed">{cat.subtitle ?? "了解详情与服务内容。"}</p>
+                <span className="flex items-center text-[#715a3e] font-bold text-xs tracking-widest">了解更多 <span className="material-symbols-outlined ml-1 text-sm">arrow_forward</span></span>
               </div>
-              <h3 className="font-bold text-lg text-[#002B49] mb-2">国际交流</h3>
-              <p className="text-xs text-slate-500 mb-4 leading-relaxed">外事手续指导、国际会议组织申报及国际合作机构联络。</p>
-              <span className="flex items-center text-[#715a3e] font-bold text-xs tracking-widest">了解更多 <span className="material-symbols-outlined ml-1 text-sm">arrow_forward</span></span>
-            </div>
-            {/* 科学传播 */}
-            <div onClick={() => setActiveTab("science")} className="bg-white border-t-4 border-[#002B49] border-x border-b border-[#E5E1DA] p-6 hover:-translate-y-1 hover:shadow-lg transition-all duration-300 cursor-pointer group rounded-b-lg">
-              <div className="bg-slate-100 w-12 h-12 flex items-center justify-center rounded-lg mb-4 group-hover:bg-[#002B49] transition-colors">
-                <span className="material-symbols-outlined text-[#002B49] group-hover:text-white">biotech</span>
-              </div>
-              <h3 className="font-bold text-lg text-[#002B49] mb-2">科学传播</h3>
-              <p className="text-xs text-slate-500 mb-4 leading-relaxed">科普工作动态、期刊服务、科普基地申请及化石保护利用。</p>
-              <span className="flex items-center text-[#715a3e] font-bold text-xs tracking-widest">探索资源 <span className="material-symbols-outlined ml-1 text-sm">arrow_forward</span></span>
-            </div>
-            {/* 科技奖励 */}
-            <div onClick={() => setActiveTab("awards")} className="bg-white border-t-4 border-[#002B49] border-x border-b border-[#E5E1DA] p-6 hover:-translate-y-1 hover:shadow-lg transition-all duration-300 cursor-pointer group rounded-b-lg">
-              <div className="bg-slate-100 w-12 h-12 flex items-center justify-center rounded-lg mb-4 group-hover:bg-[#002B49] transition-colors">
-                <span className="material-symbols-outlined text-[#002B49] group-hover:text-white">rewarded_ads</span>
-              </div>
-              <h3 className="font-bold text-lg text-[#002B49] mb-2">科技奖励</h3>
-              <p className="text-xs text-slate-500 mb-4 leading-relaxed">中国古生物学会设立多项行业权威奖项，在线填报申报材料并进行同行专家推荐评审。</p>
-              <span className="flex items-center text-[#715a3e] font-bold text-xs tracking-widest">申报奖励 <span className="material-symbols-outlined ml-1 text-sm">arrow_forward</span></span>
-            </div>
+            ))}
           </div>
         </div>
       </section>
@@ -573,7 +637,7 @@ export default function Services() {
           toast.success("缴费凭证上传成功！");
         });
       };
-      const handleInvoiceUpload = () => {
+      const handleInvoiceUpload = async () => {
         if (societyMembership?.status !== "invoice_pending" && societyMembership?.status !== "invoice_overdue") {
           toast.error("请先等待凭证初审通过后再上传发票。");
           return;
@@ -582,24 +646,26 @@ export default function Services() {
           toast.error("请先点击上方区域选择电子发票文件");
           return;
         }
-        // 直接使用上传区已选好的文件，不再重新打开文件选择框
-        submitMembershipInvoice(memberInvoice.dataUrl);
-        toast.success("电子发票已提交，等待财务终审！");
-        setMemberPayStep(1);
-        setMemberVoucher(null);
-        setMemberInvoice(null);
-        setShowFeePayment(null);
+        const ok = await submitMembershipInvoice(memberInvoice.dataUrl, memberInvoice.name);
+        if (ok) {
+          setMemberPayStep(1);
+          setMemberVoucher(null);
+          setMemberInvoice(null);
+          setShowFeePayment(null);
+        }
       };
-      const handlePaymentSubmit = () => {
+      const handlePaymentSubmit = async () => {
         if (!memberVoucher) {
           toast.error("请先上传银行转账/汇款凭证截图或照片！");
           return;
         }
-        submitMembershipVoucher(memberVoucher.dataUrl, SOCIETY_FEE);
-        setMemberPayStep(1);
-        setMemberVoucher(null);
-        setMemberInvoice(null);
-        setShowFeePayment(null);
+        const ok = await submitMembershipVoucher(memberVoucher.dataUrl, SOCIETY_FEE, memberVoucher.name);
+        if (ok) {
+          setMemberPayStep(1);
+          setMemberVoucher(null);
+          setMemberInvoice(null);
+          setShowFeePayment(null);
+        }
       };
 
       return (
@@ -976,11 +1042,14 @@ export default function Services() {
                       <div className="flex gap-2">
                         <button onClick={() => { setAppFlowStep(1); setMemberAppFile(null); }} className="flex-1 border border-slate-300 text-slate-600 rounded-lg font-bold text-xs py-2">上一步</button>
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             if (!memberAppFile) { toast.error("请先上传入会申请书"); return; }
                             chooseMembershipPath("member");
-                            submitMembershipApplication(memberAppFile.dataUrl, memberAppFile.name);
-                            setAppFlowStep(3);
+                            const ok = await submitMembershipApplication(memberAppFile.dataUrl, memberAppFile.name);
+                            if (ok) {
+                              setMemberAppFile(null);
+                              setAppFlowStep(0);
+                            }
                           }}
                           disabled={!memberAppFile}
                           className="flex-1 bg-[#002B49] hover:bg-[#001f35] disabled:opacity-40 text-white rounded-lg font-bold text-xs py-2"
@@ -994,23 +1063,6 @@ export default function Services() {
                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-xs text-yellow-800 space-y-3">
                       <p className="font-bold mb-1">⏳ 入会申请已提交</p>
                       <p className="text-yellow-700 leading-relaxed">您的入会申请书已提交，管理员将在1-3个工作日内审核。审核通过后即可进入缴费环节。</p>
-                      <div className="border-t border-yellow-200 pt-3">
-                        <p className="text-yellow-400 text-[10px] mb-2">[ 演示模式 ] 模拟管理员审核（本地联调，无需管理端）</p>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => { simApproveMembershipApplication(); setAppFlowStep(0); }}
-                            className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">check_circle</span> 模拟通过
-                          </button>
-                          <button
-                            onClick={() => simRejectMembershipApplication("申请书信息不完整")}
-                            className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">cancel</span> 模拟驳回
-                          </button>
-                        </div>
-                      </div>
                       <button
                         onClick={() => { cancelMembershipApplication(); setAppFlowStep(0); setMemberAppFile(null); }}
                         className="w-full border border-red-300 text-red-600 hover:bg-red-50 rounded-lg font-bold text-xs py-2"
@@ -1022,31 +1074,14 @@ export default function Services() {
                 </div>
               )}
 
-              {/* Phase 6: 入会申请审核中 */}
+              {/* Phase 6: 入会申请已提交 / 审核中 */}
               {isAppSubmitted && !appFlowStep && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-xs text-yellow-800 space-y-3">
-                  <p className="font-bold mb-1">⏳ 入会申请审核中</p>
-                  <p className="text-yellow-700 leading-relaxed">您的入会申请书已提交，管理员正在审核。审核通过后即可缴纳会费。</p>
+                  <p className="font-bold mb-1">⏳ 入会申请已提交</p>
+                  <p className="text-yellow-700 leading-relaxed">您的入会申请书已提交，管理员将在1-3个工作日内审核。审核通过后即可进入缴费环节。</p>
                   {membershipApplication?.applicationFileName && (
                     <p className="text-yellow-600 text-[10px]">已上传：{membershipApplication.applicationFileName}</p>
                   )}
-                  <div className="border-t border-yellow-200 pt-3">
-                    <p className="text-yellow-400 text-[10px] mb-2">[ 演示模式 ] 模拟管理员审核（本地联调，无需管理端）</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => simApproveMembershipApplication()}
-                        className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">check_circle</span> 模拟通过
-                      </button>
-                      <button
-                        onClick={() => simRejectMembershipApplication("申请书信息不完整")}
-                        className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">cancel</span> 模拟驳回
-                      </button>
-                    </div>
-                  </div>
                   <button
                     onClick={() => { cancelMembershipApplication(); setAppFlowStep(0); }}
                     className="w-full border border-red-300 text-red-600 hover:bg-red-50 rounded-lg font-bold text-xs py-2"
@@ -1136,17 +1171,6 @@ export default function Services() {
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-xs text-yellow-800 space-y-3">
                   <p className="font-bold mb-1">⏳ 凭证初审中</p>
                   <p className="text-yellow-700 leading-relaxed">您的汇款凭证已提交，请等待学会财务人工审核（通常 1-3 个工作日）。</p>
-                  <div className="border-t border-yellow-200 pt-3">
-                    <p className="text-yellow-400 text-[10px] mb-2">[ 演示模式 ] 模拟财务审核</p>
-                    <div className="flex gap-2">
-                      <button onClick={() => simApproveSocietyVoucher()} className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1">
-                        <span className="material-symbols-outlined text-[13px]">check_circle</span> 初审通过
-                      </button>
-                      <button onClick={() => simRejectSocietyVoucher("凭证模糊不清晰，无法辨认汇款信息。")} className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1">
-                        <span className="material-symbols-outlined text-[13px]">cancel</span> 初审驳回
-                      </button>
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -1183,17 +1207,6 @@ export default function Services() {
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-xs text-yellow-800 space-y-3">
                   <p className="font-bold mb-1">⏳ 发票终审中</p>
                   <p className="text-yellow-700 leading-relaxed">电子发票已提交，财务人员正在进行终审。终审通过后会员资格正式生效。</p>
-                  <div className="border-t border-yellow-200 pt-3">
-                    <p className="text-yellow-400 text-[10px] mb-2">[ 演示模式 ] 模拟财务终审</p>
-                    <div className="flex gap-2">
-                      <button onClick={() => simApproveSocietyInvoice()} className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1">
-                        终审通过
-                      </button>
-                      <button onClick={() => simRejectSocietyInvoice("发票信息与凭证金额不符")} className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1">
-                        终审驳回
-                      </button>
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -1879,15 +1892,15 @@ export default function Services() {
         });
       };
 
-      const handleConfPaymentSubmit = () => {
+      const handleConfPaymentSubmit = async () => {
         if (!confVoucher) {
           toast.error("请先上传会议费银行转账汇款回单！");
           return;
         }
         const feeAmount = getConferenceFee(confPaymentTarget);
-        payConference(confPaymentTarget, confVoucher.dataUrl, confInvoice?.dataUrl || "", feeAmount);
-        
-        // Reset local states
+        const ok = await payConference(confPaymentTarget, confVoucher.dataUrl, confInvoice?.dataUrl || "", feeAmount);
+        if (!ok) return;
+
         setConfPaymentTarget(null);
         setConfVoucher(null);
         setConfInvoice(null);
@@ -2267,17 +2280,6 @@ export default function Services() {
                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800 space-y-2 w-full">
                     <p className="font-bold">⏳ 凭证初审中</p>
                     <p className="text-yellow-600">汇款凭证已提交，财务初审中（通常 1-3 个工作日）。</p>
-                    <div className="border-t border-yellow-200 pt-2">
-                      <p className="text-yellow-400 text-[10px] mb-1.5">[ 演示模式 ] 模拟财务初审</p>
-                      <div className="flex gap-1.5">
-                        <button onClick={() => simApproveConferenceVoucher(conf!.id)} className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1">
-                          初审通过
-                        </button>
-                        <button onClick={() => simRejectConferenceVoucher(conf!.id, "凭证模糊，无法辨认汇款信息")} className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1">
-                          初审驳回
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 )}
 
@@ -2321,18 +2323,6 @@ export default function Services() {
                       </button>
                     </div>
                     <p className="text-[10px] text-slate-400 text-center">缴费终审确认后可填写参会信息并下载盖章通知</p>
-                    {/* 演示按钮 */}
-                    <div className="border-t border-slate-100 pt-1.5">
-                      <p className="text-slate-400 text-[10px] mb-1">[ 演示 ] 模拟发票终审</p>
-                      <div className="flex gap-1.5">
-                        <button onClick={() => simApproveConferenceInvoice(conf!.id)} className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded font-bold text-xs">
-                          终审通过
-                        </button>
-                        <button onClick={() => simRejectConferenceInvoice(conf!.id, "发票信息与汇款人不符")} className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold text-xs">
-                          终审驳回
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 )}
 
@@ -2359,17 +2349,6 @@ export default function Services() {
                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800 space-y-2 w-full">
                     <p className="font-bold">⏳ 发票终审中</p>
                     <p className="text-yellow-600">电子发票已提交，财务终审中。已填写的参会信息已锁定。</p>
-                    <div className="border-t border-yellow-200 pt-2">
-                      <p className="text-yellow-400 text-[10px] mb-1.5">[ 演示模式 ] 模拟财务终审</p>
-                      <div className="flex gap-1.5">
-                        <button onClick={() => simApproveConferenceInvoice(conf!.id)} className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1">
-                          终审通过
-                        </button>
-                        <button onClick={() => simRejectConferenceInvoice(conf!.id, "发票信息不一致")} className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1">
-                          终审驳回
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 )}
 
@@ -2778,17 +2757,9 @@ export default function Services() {
                         缴纳注册费
                       </button>
                     )}
-                    {/* 凭证初审中 → 可模拟审核通过 */}
+                    {/* 凭证初审中 */}
                     {(reg?.status === "voucher_submitted" || reg?.status === "pending") && (
-                      <>
-                        <span className="text-amber-600 font-bold text-[10px] text-center">⏳ 凭证初审中</span>
-                        <button
-                          onClick={() => simApproveConferenceVoucher(c.id)}
-                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-[10px] transition-colors"
-                        >
-                          ✓ 模拟凭证通过
-                        </button>
-                      </>
+                      <span className="text-amber-600 font-bold text-[10px] text-center">⏳ 凭证初审中</span>
                     )}
                     {/* 凭证被驳回 → 可重新提交 */}
                     {reg?.status === "voucher_rejected" && (
@@ -2802,7 +2773,7 @@ export default function Services() {
                         </button>
                       </>
                     )}
-                    {/* 待上传发票 → 填写信息 + 上传发票 + 模拟发票审核 */}
+                    {/* 待上传发票 */}
                     {reg?.status === "invoice_pending" && (
                       <>
                         {reg.invoiceDeadline && (
@@ -2822,15 +2793,7 @@ export default function Services() {
                     )}
                     {/* 发票终审中 */}
                     {reg?.status === "invoice_submitted" && (
-                      <>
-                        <span className="text-amber-600 font-bold text-[10px] text-center">⏳ 发票终审中</span>
-                        <button
-                          onClick={() => simApproveConferenceInvoice(c.id)}
-                          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-[10px] transition-colors"
-                        >
-                          ✓ 模拟终审通过
-                        </button>
-                      </>
+                      <span className="text-amber-600 font-bold text-[10px] text-center">⏳ 发票终审中</span>
                     )}
                     {/* 发票被驳回 → 可重新上传 */}
                     {reg?.status === "invoice_rejected" && (
@@ -2951,15 +2914,19 @@ export default function Services() {
                   </div>
                   <button
                     disabled={!confVoucher}
-                    onClick={() => {
-                      if (confVoucher) {
-                        payConference(confPaymentTarget, confVoucher.dataUrl, confInvoice?.dataUrl || "", getConferenceFee(confPaymentTarget));
-                        setConfPaymentTarget(null);
-                      }
+                    onClick={async () => {
+                      if (!confVoucher) return;
+                      const ok = await payConference(
+                        confPaymentTarget,
+                        confVoucher.dataUrl,
+                        confInvoice?.dataUrl || "",
+                        getConferenceFee(confPaymentTarget),
+                      );
+                      if (ok) setConfPaymentTarget(null);
                     }}
                     className="w-full bg-[#002B49] hover:bg-[#003d6b] disabled:opacity-40 text-white py-3 rounded-lg font-bold text-sm transition-colors"
                   >
-                    提交凳证，等待审核
+                    提交凭证，等待审核
                   </button>
                 </div>
               </div>
@@ -3020,358 +2987,384 @@ export default function Services() {
   };
 
   // ==========================================================================
-  // RENDER: SCIENCE COMMUNICATION (code4 style)
+  // RENDER: SCIENCE COMMUNICATION (CMS-driven)
   // ==========================================================================
-  const renderScienceComm = () => (
-    <div className="max-w-7xl mx-auto py-12 px-6">
-      <div className="flex flex-col md:flex-row gap-8">
-        <div className="w-full md:w-1/4 space-y-2">
-          <h2 className="text-base font-bold text-[#002B49] mb-4 border-b border-[#E5E1DA] pb-2">科学传播大纲</h2>
-          <button className="w-full text-left px-4 py-2 bg-[#002B49] text-white rounded font-bold flex justify-between items-center text-xs">科普动态 <span className="material-symbols-outlined text-sm">arrow_right_alt</span></button>
-          <button className="w-full text-left px-4 py-2 text-slate-600 hover:bg-slate-50 rounded font-bold flex justify-between items-center text-xs">科普期刊 <span className="material-symbols-outlined text-sm">chevron_right</span></button>
-          <button className="w-full text-left px-4 py-2 text-slate-600 hover:bg-slate-50 rounded font-bold flex justify-between items-center text-xs">科普基地 <span className="material-symbols-outlined text-sm">chevron_right</span></button>
-          <button className="w-full text-left px-4 py-2 text-slate-600 hover:bg-slate-50 rounded font-bold flex justify-between items-center text-xs">科普精品文章 <span className="material-symbols-outlined text-sm">chevron_right</span></button>
-          <button className="w-full text-left px-4 py-2 text-slate-600 hover:bg-slate-50 rounded font-bold flex justify-between items-center text-xs">化石保护与利用 <span className="material-symbols-outlined text-sm">chevron_right</span></button>
-        </div>
-        
-        <div className="w-full md:w-3/4 space-y-8 text-xs">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white border border-[#E5E1DA] p-6 rounded-lg">
-              <h3 className="text-sm font-bold text-[#002B49] mb-2">《Palaeoworld》</h3>
-              <p className="text-slate-500 mb-4 h-16 leading-relaxed">中国古生物学会主办的国际性英文学术期刊，侧重古生物学及地层学前沿研究成果发布。</p>
-              <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded text-[10px]">SCIE 收录 · Q1分区</span>
-            </div>
-            <div className="bg-white border border-[#E5E1DA] p-6 rounded-lg">
-              <h3 className="text-sm font-bold text-[#002B49] mb-2">《古生物学报》</h3>
-              <p className="text-slate-500 mb-4 h-16 leading-relaxed">创刊于1953年，是我国古生物学领域历史最悠久的综合性学术期刊。</p>
-              <span className="bg-green-50 text-green-700 font-bold px-2 py-0.5 rounded text-[10px]">中文核心期刊</span>
-            </div>
-            <div className="bg-white border border-[#E5E1DA] p-6 rounded-lg">
-              <h3 className="text-sm font-bold text-[#002B49] mb-2">《化石》科普杂志</h3>
-              <p className="text-slate-500 mb-4 h-16 leading-relaxed">面向社会公众的高端科普读物，以生动的语言和精美插图讲述进化故事。</p>
-              <span className="bg-orange-50 text-orange-700 font-bold px-2 py-0.5 rounded text-[10px]">全国优秀科普期刊</span>
-            </div>
+  const renderScienceListItem = (item: ApiCmsEntry) => (
+    <article key={item.entryId} className="py-4 flex flex-col gap-2 border-b border-[#E5E1DA] last:border-0 px-1 hover:bg-slate-50 transition-colors">
+      <div className="flex items-center gap-3">
+        <span className="px-2 py-0.5 font-bold text-[10px] rounded-sm bg-blue-50 text-blue-700">
+          {item.category ?? SCIENCE_FORMAT_LABELS[item.columnCode ?? "article"] ?? "科学传播"}
+        </span>
+        <time className="text-xs text-slate-500 font-medium">{formatDate(item)}</time>
+      </div>
+      <h4 className="font-bold text-[#002B49] text-sm">{item.title}</h4>
+      {item.summary && <p className="text-slate-500 leading-relaxed">{item.summary}</p>}
+      {item.bodyContent && (
+        <CmsRichTextBody html={item.bodyContent} className="text-xs text-slate-600 line-clamp-3" />
+      )}
+      {item.linkUrl && (
+        <a
+          className="text-[#002B49] font-bold text-xs flex items-center gap-1 hover:gap-2 transition-all w-fit"
+          href={item.linkUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          查看详情 <span className="material-symbols-outlined text-sm">arrow_right_alt</span>
+        </a>
+      )}
+    </article>
+  );
+
+  const renderScienceComm = () => {
+    const bookItems = filteredScienceItems.filter(i => (i.columnCode ?? "article") === "book");
+    const baseItems = filteredScienceItems.filter(i => (i.columnCode ?? "article") === "base");
+    const listItems = filteredScienceItems.filter(i => {
+      const fmt = i.columnCode ?? "article";
+      return fmt !== "book" && fmt !== "base";
+    });
+
+    return (
+      <div className="max-w-7xl mx-auto py-12 px-6">
+        <div className="flex flex-col md:flex-row gap-8">
+          <div className="w-full md:w-1/4 space-y-2">
+            <h2 className="text-base font-bold text-[#002B49] mb-4 border-b border-[#E5E1DA] pb-2">科学传播大纲</h2>
+            <button
+              type="button"
+              onClick={() => setScienceFormat("all")}
+              className={`w-full text-left px-4 py-2 rounded font-bold flex justify-between items-center text-xs ${
+                scienceFormat === "all" ? "bg-[#002B49] text-white" : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              全部内容
+              <span className="material-symbols-outlined text-sm">{scienceFormat === "all" ? "arrow_right_alt" : "chevron_right"}</span>
+            </button>
+            {SCIENCE_FORMAT_ORDER.map(fmt => (
+              <button
+                key={fmt}
+                type="button"
+                onClick={() => setScienceFormat(fmt)}
+                className={`w-full text-left px-4 py-2 rounded font-bold flex justify-between items-center text-xs ${
+                  scienceFormat === fmt ? "bg-[#002B49] text-white" : "text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {SCIENCE_FORMAT_LABELS[fmt]}
+                <span className="material-symbols-outlined text-sm">{scienceFormat === fmt ? "arrow_right_alt" : "chevron_right"}</span>
+              </button>
+            ))}
           </div>
 
-          <div className="border-t border-[#E5E1DA] pt-6">
-            <h3 className="font-bold text-[#002B49] text-sm mb-4">科普基地工作动态</h3>
-            <div className="bg-white border border-[#E5E1DA] p-5 rounded-lg flex gap-4 items-center">
-              <span className="material-symbols-outlined text-4xl text-[#715a3e]">explore</span>
-              <div>
-                <h4 className="font-bold text-[#002B49] text-xs">全国古生物科普基地申报与复核管理系统</h4>
-                <p className="text-slate-500 mt-1 leading-relaxed">中国古生物学会科普基地旨在联合全国各级自然博物馆、地质公园、科研机构，向社会公众普及地球历史生命进化知识。系统提供在线申报入口及科普大纲下载。</p>
+          <div className="w-full md:w-3/4 space-y-8 text-xs">
+            {scienceLoading && <p className="text-sm text-slate-500">加载中…</p>}
+
+            {!scienceLoading && filteredScienceItems.length === 0 && (
+              <p className="text-sm text-slate-500 py-8 text-center">暂无科学传播内容，请在管理后台「科学传播」模块维护并发布。</p>
+            )}
+
+            {!scienceLoading && bookItems.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {bookItems.map(item => (
+                  <div key={item.entryId} className="bg-white border border-[#E5E1DA] p-6 rounded-lg">
+                    <h3 className="text-sm font-bold text-[#002B49] mb-2">{item.title}</h3>
+                    <p className="text-slate-500 mb-4 min-h-16 leading-relaxed">{item.summary ?? ""}</p>
+                    {item.category && (
+                      <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded text-[10px]">{item.category}</span>
+                    )}
+                    {item.linkUrl && (
+                      <a className="mt-3 block text-[#002B49] font-bold text-[10px] hover:underline" href={item.linkUrl} target="_blank" rel="noopener noreferrer">
+                        访问链接
+                      </a>
+                    )}
+                  </div>
+                ))}
               </div>
-            </div>
+            )}
+
+            {!scienceLoading && baseItems.length > 0 && (
+              <div className="border-t border-[#E5E1DA] pt-6">
+                <h3 className="font-bold text-[#002B49] text-sm mb-4">科普基地工作动态</h3>
+                <div className="space-y-4">
+                  {baseItems.map(item => (
+                    <div key={item.entryId} className="bg-white border border-[#E5E1DA] p-5 rounded-lg flex gap-4 items-start">
+                      <span className="material-symbols-outlined text-4xl text-[#715a3e] shrink-0">explore</span>
+                      <div>
+                        <h4 className="font-bold text-[#002B49] text-xs">{item.title}</h4>
+                        {item.summary && <p className="text-slate-500 mt-1 leading-relaxed">{item.summary}</p>}
+                        {item.bodyContent && <CmsRichTextBody html={item.bodyContent} className="mt-2 text-slate-600" />}
+                        {item.linkUrl && (
+                          <a className="mt-2 inline-flex text-[#002B49] font-bold text-[10px] hover:underline" href={item.linkUrl} target="_blank" rel="noopener noreferrer">
+                            了解更多
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!scienceLoading && listItems.length > 0 && (
+              <div className={bookItems.length > 0 || baseItems.length > 0 ? "border-t border-[#E5E1DA] pt-6" : ""}>
+                {(scienceFormat === "all" && (bookItems.length > 0 || baseItems.length > 0)) && (
+                  <h3 className="font-bold text-[#002B49] text-sm mb-4">更多内容</h3>
+                )}
+                {listItems.map(renderScienceListItem)}
+              </div>
+            )}
           </div>
         </div>
       </div>
+    );
+  };
+
+  // ==========================================================================
+  // RENDER: INTERNATIONAL EXCHANGE (CMS-driven)
+  // ==========================================================================
+  const renderInternational = () => (
+    <div className="max-w-7xl mx-auto py-12 px-6">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-12">
+        <div className="lg:col-span-1">
+          <div className="sticky top-40 space-y-6">
+            <div className="bg-white border border-[#E5E1DA] rounded-lg overflow-hidden shadow-sm">
+              <div className="bg-[#002B49] text-white px-6 py-4 font-bold">栏目导航</div>
+              <nav className="flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => setIntlTypeFilter("all")}
+                  className={`px-6 py-3 border-b border-[#E5E1DA] hover:bg-slate-50 transition-colors flex items-center justify-between group text-left ${
+                    intlTypeFilter === "all" ? "bg-slate-50" : ""
+                  }`}
+                >
+                  <span className="text-sm">全部动态</span>
+                  <span className="material-symbols-outlined text-slate-400 group-hover:text-[#002B49] text-xs">arrow_forward_ios</span>
+                </button>
+                {INTL_NAV.map(nav => (
+                  <button
+                    key={nav.code}
+                    type="button"
+                    onClick={() => setIntlTypeFilter(nav.code)}
+                    className={`px-6 py-3 border-b border-[#E5E1DA] last:border-b-0 hover:bg-slate-50 transition-colors flex items-center justify-between group text-left ${
+                      intlTypeFilter === nav.code ? "bg-slate-50" : ""
+                    }`}
+                  >
+                    <span className="text-sm">{nav.label}</span>
+                    <span className="material-symbols-outlined text-slate-400 group-hover:text-[#002B49] text-xs">arrow_forward_ios</span>
+                  </button>
+                ))}
+              </nav>
+            </div>
+            <div className="p-6 bg-slate-50 border-l-4 border-[#002B49] rounded-lg">
+              <h4 className="font-bold text-[#002B49] mb-3 text-sm">联系国际合作处</h4>
+              <p className="text-xs text-slate-600 mb-4 leading-relaxed">如有国际会议、学术访问或合作咨询，欢迎联系我们。</p>
+              <a className="text-[#002B49] font-bold text-xs flex items-center gap-2 hover:underline" href="mailto:intl@chinapsc.cn">
+                <span className="material-symbols-outlined text-base">mail</span> intl@chinapsc.cn
+              </a>
+            </div>
+          </div>
+        </div>
+        <div className="lg:col-span-3">
+          <div className="mb-8 flex justify-between items-center border-b-2 border-[#002B49] pb-4">
+            <h2 className="text-2xl font-bold text-[#002B49]">国际交流动态</h2>
+          </div>
+
+          {intlLoading && <p className="text-sm text-slate-500">加载中…</p>}
+
+          {!intlLoading && filteredIntlItems.length === 0 && (
+            <p className="text-sm text-slate-500 py-8 text-center">暂无国际交流动态，请在管理后台「国际交流」模块维护并发布。</p>
+          )}
+
+          <div className="space-y-0 divide-y divide-[#E5E1DA] border-t border-[#E5E1DA]">
+            {filteredIntlItems.map(item => {
+              const type = item.columnCode ?? "news";
+              const label = INTL_TYPE_LABELS[type] ?? item.category ?? "国际交流";
+              const icon = INTL_TYPE_ICONS[type] ?? "public";
+              return (
+                <article key={item.entryId} className="py-6 flex gap-6 items-start hover:bg-slate-50 transition-all duration-200 group px-2">
+                  <div className="flex-shrink-0 w-12 h-12 bg-[#002B49] rounded-lg flex items-center justify-center text-white">
+                    <span className="material-symbols-outlined">{icon}</span>
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-3">
+                      <span className="px-2 py-0.5 font-bold text-[10px] rounded-sm bg-[#f5e0ba] text-[#241a03]">{label}</span>
+                      <time className="text-xs text-slate-500 font-medium">{formatDate(item)}</time>
+                    </div>
+                    <h3 className="text-lg font-bold mb-3 text-slate-800 group-hover:text-[#002B49] transition-colors leading-snug">
+                      {item.title}
+                    </h3>
+                    {item.summary && (
+                      <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">{item.summary}</p>
+                    )}
+                    {item.bodyContent && (
+                      <div className="mt-3 hidden lg:block">
+                        <CmsRichTextBody html={item.bodyContent} className="text-xs line-clamp-3" />
+                      </div>
+                    )}
+                    {item.linkUrl && (
+                      <div className="mt-4">
+                        <a
+                          className="text-[#002B49] font-bold text-xs flex items-center gap-1 hover:gap-2 transition-all"
+                          href={item.linkUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          查看全文 <span className="material-symbols-outlined text-sm">arrow_right_alt</span>
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                  {item.coverUrl && (
+                    <img src={item.coverUrl} alt={item.title} className="w-24 h-24 object-cover rounded border border-[#E5E1DA] shrink-0 hidden md:block" />
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <section className="bg-[#002B49] py-12 rounded-lg mt-12">
+        <div className="text-center text-white">
+          <h2 className="text-2xl font-bold mb-8">全球学术伙伴</h2>
+          {intlPartnerItems.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 opacity-90 hover:opacity-100 transition-opacity items-center justify-items-center max-w-4xl mx-auto px-4">
+              {intlPartnerItems.map(item => (
+                item.linkUrl ? (
+                  <a
+                    key={item.entryId}
+                    href={item.linkUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex flex-col items-center gap-2 hover:scale-105 transition-transform"
+                  >
+                    {item.coverUrl ? (
+                      <img src={item.coverUrl} alt={item.title} className="h-12 object-contain max-w-full" />
+                    ) : (
+                      <div className="text-sm font-bold border border-white/20 px-4 py-2 rounded">{item.title}</div>
+                    )}
+                  </a>
+                ) : (
+                  <div key={item.entryId} className="flex flex-col items-center gap-2">
+                    {item.coverUrl ? (
+                      <img src={item.coverUrl} alt={item.title} className="h-12 object-contain max-w-full" />
+                    ) : (
+                      <div className="text-sm font-bold border border-white/20 px-4 py-2 rounded">{item.title}</div>
+                    )}
+                  </div>
+                )
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-white/70">合作机构信息请在管理后台「国际交流 → 合作机构」中维护。</p>
+          )}
+        </div>
+      </section>
     </div>
   );
 
   // ==========================================================================
-  // RENDER: ADMIN SIMULATOR PANEL (Interactive Demo helper)
-  // ==========================================================================
-  const renderAdminDashboard = () => {
-    const handleApproveMemberSim = () => {
-      simApproveSocietyMembership();
-    };
-    const handleRejectMemberSim = () => {
-      simRejectSocietyMembership(simRejectReason);
-    };
-    const handleApproveConfSim = () => {
-      simApproveConference(simConfId);
-    };
-    const handleRejectConfSim = () => {
-      simRejectConference(simConfId, simRejectReason);
-    };
-
-    return (
-      <div className="max-w-4xl mx-auto py-12 px-6">
-        <div className="bg-white border border-[#E5E1DA] rounded-xl p-8 shadow-sm">
-          <div className="border-b border-slate-100 pb-4 mb-6">
-            <span className="bg-[#002B49] text-white text-[9px] font-bold px-2 py-0.5 rounded">演示沙盒工具</span>
-            <h2 className="text-lg font-bold text-[#002B49] mt-2">审核流程模拟器</h2>
-            <p className="text-xs text-slate-400 mt-1">本工具用于演示审核流程，模拟管理员对当前登录用户的"学会会费凭证"和"会议费凭证"进行批准或驳回，以便完整演示业务流转。</p>
-            <p className="text-xs text-blue-600 mt-1 font-bold">当前操作账号：{currentUser?.email || "未登录"}</p>
-          </div>
-
-          <div className="space-y-6 text-xs">
-            <div>
-              <label className="block font-bold text-slate-500 mb-1">驳回说明原因（仅在点击"驳回"时生效）</label>
-              <input
-                type="text"
-                value={simRejectReason}
-                onChange={(e) => setSimRejectReason(e.target.value)}
-                className="w-full bg-slate-50 border border-[#E5E1DA] rounded-lg px-3 py-2 text-slate-700"
-              />
-            </div>
-
-            {/* Society Membership Audit */}
-            <div className="border-t border-slate-100 pt-6">
-              <h3 className="font-bold text-[#002B49] mb-2 flex items-center gap-1">
-                <span className="material-symbols-outlined text-sm">card_membership</span> 1. 模拟审核学会会费凭证
-              </h3>
-              <p className="text-slate-400 mb-3">对当前登录用户提交的"学会会费"凭证进行审核操作。</p>
-              <div className="flex flex-wrap gap-4 items-center">
-                <button onClick={handleApproveMemberSim} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-bold shadow-sm">
-                  ✓ 批准入会（1年有效期）
-                </button>
-                <button onClick={handleRejectMemberSim} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-bold shadow-sm">
-                  ✗ 驳回凭证
-                </button>
-              </div>
-            </div>
-
-            {/* Conference Audit */}
-            <div className="border-t border-slate-100 pt-6">
-              <h3 className="font-bold text-[#002B49] mb-2 flex items-center gap-1">
-                <span className="material-symbols-outlined text-sm">groups_3</span> 2. 模拟审核会议注册费凭证
-              </h3>
-              <p className="text-slate-400 mb-3">选择会议，对当前登录用户的会议费凭证进行审核。</p>
-              <div className="flex flex-wrap gap-4 items-center">
-                <select
-                  value={simConfId}
-                  onChange={(e) => setSimConfId(e.target.value)}
-                  className="bg-slate-50 border border-[#E5E1DA] rounded-lg px-3 py-2 text-slate-700"
-                >
-                  {conferences.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
-                </select>
-                <button onClick={handleApproveConfSim} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold shadow-sm">
-                  ✓ 批准（允许填写参会信息）
-                </button>
-                <button onClick={handleRejectConfSim} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-bold shadow-sm">
-                  ✗ 驳回
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-
-  // ==========================================================================
-  // RENDER: INTERNATIONAL EXCHANGE
-  // ==========================================================================
-  const renderInternational = () => {
-    const internationalItems = [
-      {
-        category: "交流动态",
-        date: "2024-06-15",
-        title: "中国古生物学会代表团赴瑞士参加国际古生物学术研讨会",
-        desc: "应国际古生物学协会邀请，我会代表团近日赴瑞士苏黎世大学进行学术访问，并就全球气候变化背景下的化石记录研究达成多项合作协议。",
-        icon: "public"
-      },
-      {
-        category: "国际会议",
-        date: "2024-05-20",
-        title: "第十五届国际古生物学大会在北京召开",
-        desc: "本次大会汇聚了来自全球60多个国家和地区的古生物学家，共同探讨地球生命演化的前沿问题，发布了多项重要学术成果。",
-        icon: "groups"
-      },
-      {
-        category: "合作机构",
-        date: "2024-04-10",
-        title: "与美国古生物学会签署学术交流合作协议",
-        desc: "两会将在学生交流、联合研究、学术出版等方面开展深度合作，共同推进全球古生物学事业发展。",
-        icon: "handshake"
-      }
-    ];
-
-    return (
-      <div className="max-w-7xl mx-auto py-12 px-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-12">
-          <div className="lg:col-span-1">
-            <div className="sticky top-40 space-y-6">
-              <div className="bg-white border border-[#E5E1DA] rounded-lg overflow-hidden shadow-sm">
-                <div className="bg-[#002B49] text-white px-6 py-4 font-bold">栏目导航</div>
-                <nav className="flex flex-col">
-                  <a className="px-6 py-3 border-b border-[#E5E1DA] hover:bg-slate-50 transition-colors flex items-center justify-between group" href="#">
-                    <span className="text-sm">交流动态</span>
-                    <span className="material-symbols-outlined text-slate-400 group-hover:text-[#002B49] text-xs">arrow_forward_ios</span>
-                  </a>
-                  <a className="px-6 py-3 border-b border-[#E5E1DA] hover:bg-slate-50 transition-colors flex items-center justify-between group" href="#">
-                    <span className="text-sm">国际会议</span>
-                    <span className="material-symbols-outlined text-slate-400 group-hover:text-[#002B49] text-xs">arrow_forward_ios</span>
-                  </a>
-                  <a className="px-6 py-3 border-b border-[#E5E1DA] hover:bg-slate-50 transition-colors flex items-center justify-between group" href="#">
-                    <span className="text-sm">国际会议组织</span>
-                    <span className="material-symbols-outlined text-slate-400 group-hover:text-[#002B49] text-xs">arrow_forward_ios</span>
-                  </a>
-                  <a className="px-6 py-3 hover:bg-slate-50 transition-colors flex items-center justify-between group" href="#">
-                    <span className="text-sm">合作机构</span>
-                    <span className="material-symbols-outlined text-slate-400 group-hover:text-[#002B49] text-xs">arrow_forward_ios</span>
-                  </a>
-                </nav>
-              </div>
-              <div className="p-6 bg-slate-50 border-l-4 border-[#002B49] rounded-lg">
-                <h4 className="font-bold text-[#002B49] mb-3 text-sm">联系国际合作处</h4>
-                <p className="text-xs text-slate-600 mb-4 leading-relaxed">如有国际会议、学术访问或合作咨询，欢迎联系我们。</p>
-                <a className="text-[#002B49] font-bold text-xs flex items-center gap-2 hover:underline" href="mailto:intl@chinapsc.cn">
-                  <span className="material-symbols-outlined text-base">mail</span> intl@chinapsc.cn
-                </a>
-              </div>
-            </div>
-          </div>
-          <div className="lg:col-span-3">
-            <div className="mb-8 flex justify-between items-center border-b-2 border-[#002B49] pb-4">
-              <h2 className="text-2xl font-bold text-[#002B49]">国际交流动态</h2>
-            </div>
-            <div className="space-y-0 divide-y divide-[#E5E1DA] border-t border-[#E5E1DA]">
-              {internationalItems.map((item, idx) => (
-                <article key={idx} className="py-6 flex gap-6 items-start hover:bg-slate-50 transition-all duration-200 group px-2">
-                  <div className="flex-shrink-0 w-12 h-12 bg-[#002B49] rounded-lg flex items-center justify-center text-white">
-                    <span className="material-symbols-outlined">{item.icon}</span>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className="px-2 py-0.5 font-bold text-[10px] rounded-sm bg-[#f5e0ba] text-[#241a03]">{item.category}</span>
-                      <time className="text-xs text-slate-500 font-medium">{item.date}</time>
-                    </div>
-                    <h3 className="text-lg font-bold mb-3 text-slate-800 group-hover:text-[#002B49] transition-colors cursor-pointer leading-snug">
-                      {item.title}
-                    </h3>
-                    <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
-                      {item.desc}
-                    </p>
-                    <div className="mt-4">
-                      <a className="text-[#002B49] font-bold text-xs flex items-center gap-1 hover:gap-2 transition-all" href="#">
-                        查看全文 <span className="material-symbols-outlined text-sm">arrow_right_alt</span>
-                      </a>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Global Partners */}
-        <section className="bg-[#002B49] py-12 rounded-lg mt-12">
-          <div className="text-center text-white">
-            <h2 className="text-2xl font-bold mb-8">全球学术伙伴</h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 opacity-70 hover:opacity-100 transition-opacity items-center justify-items-center max-w-4xl mx-auto">
-              <div className="text-lg font-bold border border-white/20 px-6 py-3 rounded w-32">IPA</div>
-              <div className="text-lg font-bold border border-white/20 px-6 py-3 rounded w-32">UNESCO</div>
-              <div className="text-lg font-bold border border-white/20 px-6 py-3 rounded w-32">IUGS</div>
-              <div className="text-lg font-bold border border-white/20 px-6 py-3 rounded w-32">PALASS</div>
-            </div>
-          </div>
-        </section>
-      </div>
-    );
-  };
-
-  // ==========================================================================
-  // RENDER: SCIENCE & TECHNOLOGY AWARDS
+  // RENDER: SCIENCE & TECHNOLOGY AWARDS (CMS-driven)
   // ==========================================================================
   const renderAwards = () => {
-    const awards = [
-      {
-        name: "杰出成就奖",
-        desc: "表彰在古生物学研究、教育或传播中做出杰出贡献的科学家",
-        icon: "star",
-        color: "bg-yellow-50 border-yellow-200"
-      },
-      {
-        name: "青年古生物学奖",
-        desc: "鼓励45岁以下的青年学者在古生物学领域的创新研究",
-        icon: "trending_up",
-        color: "bg-blue-50 border-blue-200"
-      },
-      {
-        name: "优秀论文奖",
-        desc: "表彰在学会年会或期刊上发表的优秀学术论文",
-        icon: "description",
-        color: "bg-green-50 border-green-200"
-      },
-      {
-        name: "科普传播奖",
-        desc: "表彰在科学传播和公众教育中做出突出贡献的个人和团队",
-        icon: "campaign",
-        color: "bg-purple-50 border-purple-200"
-      }
-    ];
-
-    const winners = [
-      { year: 2023, count: 12, awardName: "杰出成就奖" },
-      { year: 2023, count: 8, awardName: "青年古生物学奖" },
-      { year: 2022, count: 15, awardName: "优秀论文奖" }
-    ];
+    const primaryGuide = techGuideItems[0];
 
     return (
       <div className="max-w-7xl mx-auto py-12 px-6">
-        {/* Award Categories Grid */}
-        <div className="mb-12">
-          <h2 className="text-2xl font-bold text-[#002B49] mb-8 border-b-2 border-[#002B49] pb-4">奖项体系</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {awards.map((award, idx) => (
-              <div key={idx} className={`p-6 rounded-lg border-2 transition-all hover:shadow-lg cursor-pointer ${award.color}`}>
-                <div className="flex items-center gap-3 mb-4">
-                  <span className="material-symbols-outlined text-3xl text-[#002B49]">{award.icon}</span>
-                  <h3 className="font-bold text-[#002B49] text-lg">{award.name}</h3>
-                </div>
-                <p className="text-sm text-slate-600 leading-relaxed">{award.desc}</p>
-                <button className="mt-4 w-full py-2 bg-[#002B49] text-white font-bold text-xs rounded hover:bg-[#001f35] transition-colors">
-                  了解详情
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
+        {techLoading && <p className="text-sm text-slate-500 mb-8">加载中…</p>}
 
-        {/* Application Guidelines */}
-        <div className="bg-white border border-[#E5E1DA] rounded-lg p-8 mb-12 shadow-sm">
-          <h3 className="text-xl font-bold text-[#002B49] mb-6 flex items-center gap-2">
-            <span className="material-symbols-outlined">info</span> 申报指南
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="p-4 bg-slate-50 rounded-lg border-l-4 border-[#002B49]">
-              <h4 className="font-bold text-[#002B49] mb-2 text-sm">申报时间</h4>
-              <p className="text-xs text-slate-600">每年3月-5月为申报期，具体时间另行通知。</p>
-            </div>
-            <div className="p-4 bg-slate-50 rounded-lg border-l-4 border-[#715a3e]">
-              <h4 className="font-bold text-[#715a3e] mb-2 text-sm">申报方式</h4>
-              <p className="text-xs text-slate-600">通过学会官网在线申报系统或邮件提交申报材料。</p>
-            </div>
-            <div className="p-4 bg-slate-50 rounded-lg border-l-4 border-[#f5e0ba]">
-              <h4 className="font-bold text-[#241a03] mb-2 text-sm">评审流程</h4>
-              <p className="text-xs text-slate-600">初审 → 专家评审 → 学会审议 → 公示 → 颁奖。</p>
-            </div>
-          </div>
-          <div className="mt-6 flex gap-4">
-            <button className="px-6 py-2 bg-[#002B49] text-white font-bold text-xs rounded hover:bg-[#001f35] transition-colors flex items-center gap-2">
-              <span className="material-symbols-outlined">download</span> 下载申报表
-            </button>
-            <button className="px-6 py-2 border-2 border-[#002B49] text-[#002B49] font-bold text-xs rounded hover:bg-slate-50 transition-colors flex items-center gap-2">
-              <span className="material-symbols-outlined">open_in_new</span> 在线申报
-            </button>
-          </div>
-        </div>
+        {!techLoading && techIntroItems.length === 0 && techGuideItems.length === 0 && (
+          <p className="text-sm text-slate-500 py-8 text-center mb-8">暂无科技奖励内容，请在管理后台「科技奖励」模块维护并发布。</p>
+        )}
 
-        {/* Past Winners */}
-        <div>
-          <h3 className="text-xl font-bold text-[#002B49] mb-6 flex items-center gap-2">
-            <span className="material-symbols-outlined">history</span> 历届获奖者
-          </h3>
-          <div className="space-y-4">
-            {winners.map((winner, idx) => (
-              <div key={idx} className="bg-white border border-[#E5E1DA] p-6 rounded-lg shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-bold text-[#002B49] text-lg">{winner.awardName}</h4>
-                    <p className="text-sm text-slate-500 mt-1">{winner.year}年度</p>
+        {techIntroItems.length > 0 && (
+          <div className="mb-12">
+            <h2 className="text-2xl font-bold text-[#002B49] mb-8 border-b-2 border-[#002B49] pb-4">奖项体系</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {techIntroItems.map((item, idx) => {
+                const style = AWARD_CARD_STYLES[idx % AWARD_CARD_STYLES.length];
+                return (
+                  <div key={item.entryId} className={`p-6 rounded-lg border-2 transition-all hover:shadow-lg ${style.color}`}>
+                    <div className="flex items-center gap-3 mb-4">
+                      <span className="material-symbols-outlined text-3xl text-[#002B49]">{style.icon}</span>
+                      <h3 className="font-bold text-[#002B49] text-lg">{item.title}</h3>
+                    </div>
+                    {item.summary && (
+                      <p className="text-sm text-slate-600 leading-relaxed mb-3">{item.summary}</p>
+                    )}
+                    {item.bodyContent && (
+                      <CmsRichTextBody html={item.bodyContent} className="text-sm text-slate-600 leading-relaxed line-clamp-4" />
+                    )}
+                    {item.linkUrl && (
+                      <a
+                        href={item.linkUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-4 w-full py-2 bg-[#002B49] text-white font-bold text-xs rounded hover:bg-[#001f35] transition-colors flex items-center justify-center gap-1"
+                      >
+                        了解详情 <span className="material-symbols-outlined text-sm">open_in_new</span>
+                      </a>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <div className="text-3xl font-bold text-[#002B49]">{winner.count}</div>
-                    <p className="text-xs text-slate-500">位获奖者</p>
-                  </div>
-                </div>
-              </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
+
+        {techGuideItems.length > 0 && (
+          <div className="bg-white border border-[#E5E1DA] rounded-lg p-8 mb-12 shadow-sm">
+            <h3 className="text-xl font-bold text-[#002B49] mb-6 flex items-center gap-2">
+              <span className="material-symbols-outlined">info</span> 申报指南
+            </h3>
+            {techGuideItems.length === 1 ? (
+              <>
+                {primaryGuide.title && primaryGuide.title !== "申报指南" && (
+                  <h4 className="font-bold text-[#002B49] mb-4">{primaryGuide.title}</h4>
+                )}
+                {primaryGuide.bodyContent && (
+                  <CmsRichTextBody html={primaryGuide.bodyContent} className="text-sm text-slate-600 leading-relaxed prose-sm max-w-none" />
+                )}
+              </>
+            ) : (
+              <div className="space-y-8">
+                {techGuideItems.map(item => (
+                  <div key={item.entryId} className="border-b border-[#E5E1DA] last:border-0 pb-6 last:pb-0">
+                    <h4 className="font-bold text-[#002B49] mb-3">{item.title}</h4>
+                    {item.bodyContent && (
+                      <CmsRichTextBody html={item.bodyContent} className="text-sm text-slate-600 leading-relaxed" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-6 flex flex-wrap gap-4">
+              {techGuideItems.some(g => g.fileUrl) && (
+                techGuideItems.filter(g => g.fileUrl).map(g => (
+                  <a
+                    key={g.entryId}
+                    href={g.fileUrl!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-6 py-2 bg-[#002B49] text-white font-bold text-xs rounded hover:bg-[#001f35] transition-colors flex items-center gap-2"
+                  >
+                    <span className="material-symbols-outlined">download</span> 下载{g.title.includes("申报") ? "申报表" : "附件"}
+                  </a>
+                ))
+              )}
+              {techGuideItems.some(g => g.linkUrl) && (
+                techGuideItems.filter(g => g.linkUrl).map(g => (
+                  <a
+                    key={`link-${g.entryId}`}
+                    href={g.linkUrl!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-6 py-2 border-2 border-[#002B49] text-[#002B49] font-bold text-xs rounded hover:bg-slate-50 transition-colors flex items-center gap-2"
+                  >
+                    <span className="material-symbols-outlined">open_in_new</span> 在线申报
+                  </a>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -3666,15 +3659,15 @@ export default function Services() {
             <button onClick={() => { setActiveTab("conference"); setShowFeePayment(null); setSelectedConference(null); setEditingReg(null); }} className={`px-4 py-3 font-bold text-xs transition-all flex items-center gap-2 border-b-2 -mb-[1px] ${activeTab === "conference" ? "border-[#002B49] text-[#002B49]" : "border-transparent text-slate-500 hover:text-[#002B49]"}`}>
               <span className="material-symbols-outlined text-[18px]">event</span> 学术会议
             </button>
-            <button onClick={() => { setActiveTab("international"); setShowFeePayment(null); setSelectedConference(null); setEditingReg(null); }} className={`px-4 py-3 font-bold text-xs transition-all flex items-center gap-2 border-b-2 -mb-[1px] ${activeTab === "international" ? "border-[#002B49] text-[#002B49]" : "border-transparent text-slate-500 hover:text-[#002B49]"}`}>
-              <span className="material-symbols-outlined text-[18px]">public</span> 国际交流
-            </button>
-            <button onClick={() => { setActiveTab("science"); setShowFeePayment(null); setSelectedConference(null); setEditingReg(null); }} className={`px-4 py-3 font-bold text-xs transition-all flex items-center gap-2 border-b-2 -mb-[1px] ${activeTab === "science" ? "border-[#002B49] text-[#002B49]" : "border-transparent text-slate-500 hover:text-[#002B49]"}`}>
-              <span className="material-symbols-outlined text-[18px]">campaign</span> 科学传播
-            </button>
-            <button onClick={() => { setActiveTab("awards"); setShowFeePayment(null); setSelectedConference(null); setEditingReg(null); }} className={`px-4 py-3 font-bold text-xs transition-all flex items-center gap-2 border-b-2 -mb-[1px] ${activeTab === "awards" ? "border-[#002B49] text-[#002B49]" : "border-transparent text-slate-500 hover:text-[#002B49]"}`}>
-              <span className="material-symbols-outlined text-[18px]">workspace_premium</span> 科技奖励
-            </button>
+            {cmsServiceTabs.map(cat => (
+              <button
+                key={cat.websiteTabKey}
+                onClick={() => { setActiveTab(cat.websiteTabKey); setShowFeePayment(null); setSelectedConference(null); setEditingReg(null); }}
+                className={`px-4 py-3 font-bold text-xs transition-all flex items-center gap-2 border-b-2 -mb-[1px] ${activeTab === cat.websiteTabKey ? "border-[#002B49] text-[#002B49]" : "border-transparent text-slate-500 hover:text-[#002B49]"}`}
+              >
+                <span className="material-symbols-outlined text-[18px]">{CMS_TAB_ICONS[cat.contentModule]}</span> {cat.navName}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -3684,9 +3677,9 @@ export default function Services() {
           {activeTab === "branches" && renderBranches()}
           {activeTab === "member" && renderMemberServices()}
           {activeTab === "conference" && (selectedConference || editingReg ? renderConferenceServices() : renderConferenceList())}
-          {activeTab === "science" && renderScienceComm()}
-          {activeTab === "international" && renderInternational()}
-          {activeTab === "awards" && renderAwards()}
+          {activeCmsCategory?.contentModule === "science" && renderScienceComm()}
+          {activeCmsCategory?.contentModule === "international" && renderInternational()}
+          {activeCmsCategory?.contentModule === "tech-rewards" && renderAwards()}
         </div>
       </div>
       <LoginJoinDialog open={dialogOpen} onOpenChange={setDialogOpen} initialTab={dialogTab} />

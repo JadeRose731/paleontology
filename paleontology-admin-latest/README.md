@@ -1,8 +1,12 @@
 # 中国古生物学会 · 管理后台
 
-中国古生物学会（Palaeontological Society of China）管理后台 —— 基于 React 的浏览器端单页应用（SPA），用于管理学会及其 11 个分会的会员、学术会议、财务审核、统计数据和分支机构。
+中国古生物学会（Palaeontological Society of China）管理后台 —— 基于 React 的浏览器端单页应用（SPA），用于管理学会及其 11 个分会的会员、学术会议、财务审核、统计数据、分支机构，以及 CMS 内容与栏目编排。
 
-> **注意：** 当前版本为**纯前端原型**，所有数据存储在浏览器 `localStorage` 中，首次加载时会自动填充演示数据。无需后端服务器即可完整体验全部功能。
+> **架构说明：** 本应用采用**混合数据模式**：
+> - **CMS 内容**（轮播、新闻、栏目、版式等）通过 `paleontology-cms-backend` REST API 读写（MySQL 持久化）
+> - **业务数据**（会员、会议报名、审核、财务）仍存储在浏览器 `localStorage`，首次加载自动填充演示数据
+>
+> 开发 CMS 功能时需先启动后端（`http://localhost:8089`）；仅体验会员/审核模块时可不启动后端。
 
 ---
 
@@ -13,13 +17,14 @@
 | **框架** | React 19 |
 | **语言** | TypeScript 5.6 |
 | **构建工具** | Vite 7 |
-| **包管理器** | pnpm 10 |
+| **包管理器** | pnpm 10.4 |
 | **CSS 框架** | Tailwind CSS v4 |
 | **组件库** | shadcn/ui (New York 风格) + Radix UI 原语 |
 | **路由** | wouter (支持 Hash 路由) |
 | **表单** | react-hook-form + zod 校验 |
 | **图表** | recharts |
 | **动画** | framer-motion |
+| **Toast** | sonner |
 | **图标** | lucide-react |
 | **文件导出** | JSZip + file-saver |
 
@@ -36,37 +41,47 @@ paleontology-admin-latest/
 │       ├── main.tsx                 # 应用入口
 │       ├── App.tsx                  # 路由定义
 │       ├── index.css                # Tailwind + CSS 变量主题
-│       ├── components/              # 布局组件
+│       ├── components/              # 布局与 UI 组件
 │       │   ├── AdminLayout.tsx      # 认证布局（侧边栏 + 顶栏 + 内容区）
-│       │   ├── AdminSidebar.tsx     # 导航侧边栏（角色权限过滤）
-│       │   └── AdminTopBar.tsx      # 顶栏（通知 + 用户菜单）
+│       │   ├── AdminSidebar.tsx     # 导航侧边栏（角色 + CMS 栏目树过滤）
+│       │   ├── AdminTopBar.tsx      # 顶栏（通知 + 用户菜单）
+│       │   └── ui/                  # shadcn/ui 组件（25+）
 │       ├── contexts/
-│       │   └── AdminContext.tsx      # 全局状态管理（认证/数据/CRUD/审计/统计）
+│       │   └── AdminContext.tsx     # 全局状态（认证/业务 CRUD/审计/统计/菜单）
+│       ├── lib/
+│       │   ├── cms-api.ts           # CMS REST 客户端（JWT、条目/栏目/版式/仪表盘）
+│       │   ├── cms-sync.ts          # CmsDatabase ↔ ApiCmsEntry 双向映射
+│       │   ├── cms-channel-nav.ts   # CMS 栏目树 → 侧边栏菜单
+│       │   ├── cms-layout-schemas.ts# 版式参数 JSON Schema
+│       │   └── utils.ts             # cn() 工具函数
 │       ├── hooks/
 │       │   └── useComposition.ts    # 中文输入法 composition 事件处理
-│       ├── lib/
-│       │   └── utils.ts             # cn() 工具函数
-│       ├── pages/admin/
-│       │   ├── LoginPage.tsx         # 登录页
-│       │   ├── Dashboard.tsx         # 仪表盘（统计卡片、图表、审核队列）
-│       │   ├── AuditWorkbench.tsx     # 财务审核工作台
-│       │   ├── MemberManagement.tsx   # 会员管理
-│       │   ├── NonMemberManagement.tsx# 非会员用户管理
-│       │   ├── ConferenceManagement.tsx# 学术会议管理
-│       │   ├── Statistics.tsx        # 三级统计（全局/分会/会议）
-│       │   ├── FinanceRecords.tsx    # 财务记录与导出
-│       │   ├── BranchManagement.tsx  # 分支机构管理
-│       │   └── NotFound.tsx          # 404 页面
-│       └── ui/                      # shadcn/ui 组件（25+）
+│       └── pages/admin/
+│           ├── LoginPage.tsx        # 登录页（业务登录 + CMS JWT）
+│           ├── Dashboard.tsx        # 仪表盘（业务统计 + CMS API 汇总）
+│           ├── AuditWorkbench.tsx   # 财务审核工作台
+│           ├── MemberManagement.tsx # 会员管理
+│           ├── NonMemberManagement.tsx
+│           ├── ConferenceManagement.tsx
+│           ├── Statistics.tsx       # 三级统计
+│           ├── FinanceRecords.tsx   # 财务记录与 ZIP 导出
+│           ├── BranchManagement.tsx
+│           ├── cms/
+│           │   ├── ContentManagement.tsx  # 17 个 CMS 子模块内容编辑
+│           │   ├── ChannelManagement.tsx  # 栏目编排与版式参数
+│           │   ├── LayoutParamsEditor.tsx
+│           │   ├── cms-data.ts      # CMS 领域类型 + fetch/save API 封装
+│           │   ├── cms-nav.ts       # 子模块元数据与党建栏目码
+│           │   └── cms-ui.tsx       # CMS 共享 UI 片段
+│           └── NotFound.tsx
 ├── shared/                          # 共享常量
-│   ├── const.ts                     # Cookie 名称等
+│   ├── const.ts
 │   └── constants.ts                 # 费用配置、状态枚举、分会映射等
-├── docs/                            # 文档目录
-├── vite.config.ts                   # Vite 配置（标准构建）
-├── vite.singlefile.config.ts        # Vite 配置（单文件构建）
-├── tsconfig.json                    # TypeScript 配置
+├── vite.config.ts                   # Vite 配置（含 CMS 后端代理）
+├── vite.singlefile.config.ts        # 单文件构建配置
+├── tsconfig.json
 ├── components.json                  # shadcn/ui 配置
-└── package.json                     # 项目清单
+└── package.json
 ```
 
 ---
@@ -77,6 +92,7 @@ paleontology-admin-latest/
 
 - **Node.js** ≥ 18
 - **pnpm** ≥ 10（推荐使用 `corepack enable && corepack prepare pnpm@latest --activate`）
+- **CMS 功能**：MySQL + `paleontology-cms-backend`（见 [CMS 后端 README](../paleontology-cms-backend/README.md)）
 
 ### 安装与运行
 
@@ -94,6 +110,20 @@ pnpm check
 pnpm format
 ```
 
+### 联调 CMS 后端
+
+```bash
+# 终端 1：启动 CMS 后端
+cd ../paleontology-cms-backend
+mvn spring-boot:run
+
+# 终端 2：启动管理端（vite.config.ts 已配置代理）
+cd ../paleontology-admin-latest
+pnpm dev
+```
+
+`vite.config.ts` 已将 `/paleo`、`/login`、`/getInfo`、`/uploads` 代理到 `http://localhost:8089`。
+
 ### 构建
 
 ```bash
@@ -104,7 +134,6 @@ pnpm build
 pnpm preview
 
 # 单文件 HTML 构建 → dist/singlefile/
-# 所有 JS/CSS 内联，可通过 file:// 协议直接打开
 pnpm build:singlefile
 ```
 
@@ -114,44 +143,67 @@ pnpm build:singlefile
 
 ### 认证与权限
 
-系统内置三种角色，共 13 个演示账号：
+系统内置三种角色，共 13 个演示账号（业务登录，存于 `localStorage`）：
 
 | 角色 | 权限范围 | 演示账号 |
 |------|----------|----------|
-| **学会总管理员** (super_admin) | 全部功能 | `admin@paleo.cn` |
-| **分会管理员** (branch_admin) | 管理本分会会议、统计 | 11 个分会各一个账号 |
+| **学会总管理员** (super_admin) | 全部功能 + 全部 CMS 模块 | `admin@paleo.cn` |
+| **分会管理员** (branch_admin) | 本分会会议、统计、分会 CMS | 11 个分会各一个账号 |
 | **财务审核员** (finance_reviewer) | 审核、财务记录 | `finance@paleo.cn` |
 
-> 所有演示账号密码均为 `123456`。登录页会展示可用账号列表。
+> 所有演示账号密码均为 `123456`。登录成功后自动尝试 CMS JWT 登录（`admin` / `admin123`）；后端未启动时不阻断业务登录。
 
-### 功能页面
+### 业务页面
 
 | 路由 | 页面 | 功能描述 |
 |------|------|----------|
 | `/admin/login` | 登录 | 表单登录，zod 校验，演示账号提示 |
-| `/admin/dashboard` | 仪表盘 | 统计卡片、柱状图/饼图、最近审核队列、12 分会费用图表 |
-| `/admin/audit` | 审核工作台 | 两阶段缴费审核（凭证→发票）、会员申请审核、批量操作 |
-| `/admin/users/members` | 会员管理 | 搜索/筛选、详情面板、手动激活/到期、启用/禁用 |
+| `/admin/dashboard` | 仪表盘 | 统计卡片、柱状图/饼图、审核队列、缴费趋势 |
+| `/admin/audit` | 审核工作台 | 两阶段缴费审核、入会/退会审核、批量操作 |
+| `/admin/users/members` | 会员管理 | 搜索/筛选、详情、手动激活/到期 |
 | `/admin/users/non-members` | 非会员管理 | 非会员用户管理 |
-| `/admin/conferences` | 会议管理 | 会议 CRUD、4 档费用配置、文件上传（盖章通知/摘要模板）、住宿/考察路线 |
-| `/admin/statistics` | 统计中心 | 三级钻取：全局 → 分会 → 会议，含费用明细和报告统计 |
-| `/admin/finance` | 财务记录 | 缴费记录浏览/筛选/详情，按会议/分会 ZIP 导出 |
-| `/admin/branches` | 分会管理 | 编辑分会名称/简介/Logo，启用/禁用分会 |
+| `/admin/conferences` | 会议管理 | 会议 CRUD、4 档费用、模板上传、住宿/考察路线 |
+| `/admin/statistics` | 统计中心 | 三级钻取：全局 → 分会 → 会议 |
+| `/admin/finance` | 财务记录 | 缴费记录浏览/筛选，ZIP 分类导出 |
+| `/admin/branches` | 分会管理 | 编辑分会名称/简介/Logo，启用/禁用 |
+
+### CMS 内容管理
+
+| 路由 | 页面 | 功能描述 |
+|------|------|----------|
+| `/admin/cms` | 重定向 | 跳转至角色默认 CMS 子模块 |
+| `/admin/cms/:section` | 内容管理 | 17 个子模块 CRUD（见下方 moduleCode 列表） |
+| `/admin/cms/channels` | 栏目编排 | 频道树、版式类型、layoutParams、区块维护 |
+
+CMS 子模块（`:section`）与 `moduleCode` 对应：
+
+`banners` · `news` · `pages` · `personnel` · `awards` · `announcements` · `timeline` · `gallery` · `international` · `downloads` · `regulations` · `science` · `tech-rewards` · `party` · `branch` · `media` · `settings` · `publish` · `public-files`
+
+数据流：`ContentManagement` → `fetchCmsDatabase()` / `saveCmsDatabase()` → `cms-api.ts` → `/paleo/cms` REST API。本地 `localStorage`（`paleo_admin_cms_db`）仅作缓存。
 
 ---
 
 ## 数据模型
 
-所有数据以 `paleo_admin_*` 为 key 前缀存储在 `localStorage` 中，包括：
+### 业务数据（localStorage，`paleo_admin_*` 前缀）
 
-- **Users** — 管理员账号（邮箱、姓名、密码、性别、单位、角色）
-- **Memberships** — 会员记录（2 阶段缴费流程：凭证审核 → 发票审核）
-- **Conferences** — 学术会议（4 档费用、截止日期、分会场、考察路线、住宿）
+- **Users** — 管理员账号
+- **Memberships** — 会员记录（2 阶段缴费流程）
+- **Conferences** — 学术会议（4 档费用、截止日期、分会场等）
 - **Branches** — 11 个分会 + 1 个总会
 - **Audit Logs** — 审核操作日志
-- **Notifications** — 管理员通知系统
+- **Notifications** — 管理员通知
 
-首次加载时 `seedDemoData()` 会自动生成 30+ 位中国古生物研究者的模拟数据。
+首次加载时 `seedDemoData()` 自动生成 30+ 位模拟研究者数据。
+
+### CMS 数据（MySQL，经 API）
+
+- **Entries** — 内容条目（`moduleCode` + `columnCode` + `extraJson`）
+- **Channels** — 栏目编排（路由、版式、导航、内容过滤）
+- **Blocks** — 栏目内区块
+- **Layouts** — 版式注册表（`layoutType` → React 组件映射）
+
+JWT 存于 `localStorage` 的 `paleo_cms_token`。
 
 ---
 
@@ -175,8 +227,7 @@ pnpm build:singlefile
 
 - 输出到 `dist/singlefile/`
 - 所有 JS/CSS 内联为单个 HTML 文件
-- 强制使用 Hash 路由（兼容 `file://` 协议）
-- 可通过浏览器直接打开，无需 Web 服务器
+- 强制 Hash 路由（兼容 `file://` 协议）
 - 文件上限 100MB
 
 ---
@@ -204,40 +255,30 @@ pnpm build:singlefile
 
 - 页面组件位于 `client/src/pages/admin/`
 - 布局组件位于 `client/src/components/`
-- UI 基础组件位于 `client/src/ui/`（由 shadcn/ui 生成）
-- 全局状态集中在 `AdminContext.tsx` 中管理
+- UI 基础组件位于 `client/src/components/ui/`（shadcn/ui）
+- 业务状态集中在 `AdminContext.tsx`；CMS API 在 `lib/cms-api.ts`
 
 ### 样式
 
-- 使用 Tailwind CSS v4 工具类
-- 自定义主题变量定义在 `client/src/index.css` 的 `@theme` 块中
-- 使用 `cn()` 工具函数合并类名（`clsx` + `tailwind-merge`）
+- Tailwind CSS v4 工具类 + `@theme` 自定义变量（`index.css`）
+- `cn()` 合并类名（`clsx` + `tailwind-merge`）
 - 组件变体使用 `class-variance-authority`
-
-### 表单处理
-
-- 使用 `react-hook-form` 管理表单状态
-- 使用 `zod` 定义校验 schema
-- 通过 `@hookform/resolvers` 集成
 
 ### 中文输入
 
-- `useComposition` hook 处理 IME 组合输入事件
-- 在搜索框等需要即输即搜的组件中使用，避免中文输入过程中误触发搜索
+- `useComposition` hook 处理 IME 组合输入，避免中文输入过程中误触发搜索
 
 ---
 
-## 三级统计字段（Phase 3 / MRD 对齐）
+## 三级统计字段（MRD 对齐）
 
 所有会议相关数字均通过 `collectConferenceAttendees` 从 `paleo_admin_confs_*` 实收聚合，**禁止**用 `registrations` 字段估算。
 
 | 层级 | 主要指标 |
 |------|----------|
-| **全局** | 总注册/会员/非会员（含学生分层）、会员费累计（学生/非学生笔数金额）、12 学会会议费分项 |
+| **全局** | 总注册/会员/非会员（含学生分层）、会员费累计、12 学会会议费分项 |
 | **学会/分会** | 累计确认参会人数、四类人群人数、四类会议费笔数/金额 |
-| **单次会议** | 四类费用笔数/金额、确认参会总人数、口头/展板报告、住宿（总房间/男单/男双/女单/女双）、野外（会前/会中/会后 × 总/男/女） |
-
-Dashboard「实收缴费趋势」来自近 12 个月已确认会员费/会议费笔数。
+| **单次会议** | 四类费用笔数/金额、确认参会总人数、口头/展板报告、住宿、野外 |
 
 ## ZIP 导出目录规范
 
@@ -256,7 +297,7 @@ export_{scope}_{id}_{date}/
 
 ## 与用户端 localStorage 联调
 
-管理端审核/导出读取 `paleo_admin_*` key；审核写回时同步 `paleo_*` key（与用户端 Phase 2 双写约定一致）：
+管理端审核/导出读取 `paleo_admin_*` key；审核写回时同步 `paleo_*` key：
 
 | 管理端 | 用户端 |
 |--------|--------|
@@ -265,17 +306,14 @@ export_{scope}_{id}_{date}/
 | `paleo_admin_society_membership_{email}` | `paleo_society_membership_{email}` |
 | `paleo_admin_confs_{email}` | `paleo_confs_{email}` |
 
-入会/退会/凭证/发票审核均双向同步；用户端通过 `storage` 事件 + 轮询刷新状态。
+用户端通过 `storage` 事件 + 轮询刷新状态。
 
 ---
 
-## 路线图（已完成阶段）
+## 路线图
 
-- **Phase 0** — 数据模型更新（4 档费用、用户身份、住宿/考察路线）
-- **Phase 1** — 分会管理员数据隔离、4 档会议费用配置
-- **Phase 2** — 文件上传管理（盖章通知、摘要模板）
-- **Phase 3** — 三级统计实收聚合、Dashboard 缴费趋势、ZIP 分类导出、入会/退会审核联调、分会会议 Tab
-- **Phase 4** — 生产栈对齐（Vue 子模块 + 后端 API）
+- **Phase 0–3** — 数据模型、分会隔离、三级统计、ZIP 导出、审核联调 ✅
+- **Phase 4（进行中）** — CMS 内容/栏目已对接 `paleontology-cms-backend`；会员/会议业务仍待对接生产 API
 - **Phase 5** — 文档同步与验收
 
 ---

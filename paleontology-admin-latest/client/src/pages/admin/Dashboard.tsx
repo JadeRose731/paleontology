@@ -82,28 +82,31 @@ function SuperAdminView({ stats }: { stats: DashboardStats }) {
 
   const [apiStats, setApiStats] = useState<ApiDashboardStats | null>(null);
   useEffect(() => {
-    fetchDashboardStats().then(data => { if (data) setApiStats(data); });
-  }, []);
+    fetchDashboardStats().then((data) => { if (data) setApiStats(data); });
+  }, [stats.totalUsers, stats.memberCount, stats.activeMembers, stats.nonMemberCount]);
 
   const globalStats = apiStats ? {
     ...localGlobalStats,
+    totalUsers: apiStats.totalUsers,
+    totalMembers: apiStats.memberCount,
+    totalNonMembers: apiStats.nonMemberCount,
     studentMembers: apiStats.studentMembers,
     nonStudentMembers: apiStats.nonStudentMembers,
     studentNonMembers: apiStats.studentNonMembers,
     nonStudentNonMembers: apiStats.nonStudentNonMembers,
     totalMembershipFee: apiStats.totalMembershipFee,
+    studentMembershipFeeAmount: apiStats.studentMembershipFeeAmount ?? 0,
+    nonStudentMembershipFeeAmount: apiStats.nonStudentMembershipFeeAmount ?? 0,
     totalConferenceFee: apiStats.totalConferenceFee,
-    studentMembershipFeeAmount: localGlobalStats.studentMembershipFeeAmount,
-    nonStudentMembershipFeeAmount: localGlobalStats.nonStudentMembershipFeeAmount,
-    perSocietyConferenceFee: localGlobalStats.perSocietyConferenceFee,
+    perSocietyConferenceFee: apiStats.perSocietyConferenceFee ?? localGlobalStats.perSocietyConferenceFee,
     perSocietyFeeBreakdown: localGlobalStats.perSocietyFeeBreakdown,
   } : localGlobalStats;
 
   const effectiveStats: DashboardStats = apiStats ? {
     ...stats,
     totalUsers: apiStats.totalUsers,
-    memberCount: apiStats.memberCount,
     nonMemberCount: apiStats.nonMemberCount,
+    memberCount: apiStats.memberCount,
     activeMembers: apiStats.activeMembers,
     activeConferences: apiStats.activeConferences,
     branchMemberCounts: apiStats.branchMemberCounts.length > 0 ? apiStats.branchMemberCounts : stats.branchMemberCounts,

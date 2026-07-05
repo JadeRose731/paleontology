@@ -45,6 +45,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
         anonymousPaths.add("/paleo/cms/public/**");
         anonymousPaths.add("/paleo/cms-channels/public/**");
         anonymousPaths.add("/paleo/cms-layouts/public/**");
+        anonymousPaths.add("/paleo/auth/register");
+        anonymousPaths.add("/paleo/auth/login");
 
         handlerMapping.getHandlerMethods().forEach((RequestMappingInfo info, HandlerMethod method) -> {
             if (method.hasMethodAnnotation(Anonymous.class) || method.getBeanType().isAnnotationPresent(Anonymous.class)) {
@@ -67,6 +69,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 .antMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .antMatchers(anonymousPaths.toArray(new String[0])).permitAll()
                 .anyRequest().authenticated()
+                .and()
+                .headers().frameOptions().sameOrigin()
                 .and()
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
     }

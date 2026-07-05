@@ -12,8 +12,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Check, X, Eye, Clock, FileText } from "lucide-react";
+import { Check, X, Eye, Clock } from "lucide-react";
 import { MEMBERSHIP_STATUS_LABEL, CONFERENCE_STATUS_LABEL, CONFERENCE_STATUS_COLOR } from "@shared/constants";
+import { FilePreviewDialog } from "@/components/FilePreviewDialog";
 
 function StatusBadge({ status }: { status: string }) {
   const label = MEMBERSHIP_STATUS_LABEL[status] || CONFERENCE_STATUS_LABEL[status] || status;
@@ -22,36 +23,6 @@ function StatusBadge({ status }: { status: string }) {
     <Badge variant="outline" className={color}>
       {label}
     </Badge>
-  );
-}
-
-function FilePreviewDialog({
-  open,
-  onOpenChange,
-  url,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  url: string;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>文件预览</DialogTitle>
-        </DialogHeader>
-        <div className="flex items-center justify-center overflow-auto">
-          {url ? (
-            <img src={url} alt="Payment proof" className="max-w-full max-h-[60vh] object-contain rounded" />
-          ) : (
-            <div className="flex flex-col items-center gap-2 text-muted-foreground py-12">
-              <FileText className="h-12 w-12" />
-              <span>暂无文件</span>
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -306,7 +277,7 @@ function VoucherTab() {
   } = useAdmin();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [preview, setPreview] = useState<{ url: string; fileName?: string; title?: string }>({ url: "" });
   const [previewOpen, setPreviewOpen] = useState(false);
   const [rejectItem, setRejectItem] = useState<ReviewItem | null>(null);
   const [batchRejectOpen, setBatchRejectOpen] = useState(false);
@@ -329,8 +300,8 @@ function VoucherTab() {
     }
   };
 
-  const handlePreview = (url: string) => {
-    setPreviewUrl(url);
+  const handlePreview = (url: string, fileName?: string, title?: string) => {
+    setPreview({ url, fileName, title });
     setPreviewOpen(true);
   };
 
@@ -428,7 +399,13 @@ function VoucherTab() {
         </CardContent>
       </Card>
 
-      <FilePreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} url={previewUrl} />
+      <FilePreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        url={preview.url}
+        fileName={preview.fileName}
+        title={preview.title}
+      />
 
       <RejectDialog
         open={!!rejectItem}
@@ -482,7 +459,7 @@ function InvoiceTab() {
   } = useAdmin();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [preview, setPreview] = useState<{ url: string; fileName?: string; title?: string }>({ url: "" });
   const [previewOpen, setPreviewOpen] = useState(false);
   const [rejectItem, setRejectItem] = useState<ReviewItem | null>(null);
   const [extendItem, setExtendItem] = useState<ReviewItem | null>(null);
@@ -506,8 +483,8 @@ function InvoiceTab() {
     }
   };
 
-  const handlePreview = (url: string) => {
-    setPreviewUrl(url);
+  const handlePreview = (url: string, fileName?: string, title?: string) => {
+    setPreview({ url, fileName, title });
     setPreviewOpen(true);
   };
 
@@ -617,7 +594,13 @@ function InvoiceTab() {
         </CardContent>
       </Card>
 
-      <FilePreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} url={previewUrl} />
+      <FilePreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        url={preview.url}
+        fileName={preview.fileName}
+        title={preview.title}
+      />
 
       <RejectDialog
         open={!!rejectItem}
@@ -674,18 +657,18 @@ function MembershipAppTab() {
     rejectMembershipApplication,
   } = useAdmin();
 
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [preview, setPreview] = useState<{ url: string; fileName?: string; title?: string }>({ url: "" });
   const [previewOpen, setPreviewOpen] = useState(false);
   const [rejectItem, setRejectItem] = useState<MembershipAppRecord | null>(null);
 
-  const handlePreview = (url: string) => {
-    setPreviewUrl(url);
+  const handlePreview = (url: string, fileName?: string, title?: string) => {
+    setPreview({ url, fileName, title });
     setPreviewOpen(true);
   };
 
   const handleReject = (reason: string) => {
     if (!rejectItem) return;
-    rejectMembershipApplication(rejectItem.userEmail, reason);
+    rejectMembershipApplication(rejectItem.applicationId, reason);
     setRejectItem(null);
   };
 
@@ -727,7 +710,7 @@ function MembershipAppTab() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handlePreview(app.applicationFileUrl)}
+                        onClick={() => handlePreview(app.applicationFileUrl, app.applicationFileName, "入会申请书预览")}
                       >
                         <Eye className="h-4 w-4 mr-1" />
                         查看
@@ -739,7 +722,7 @@ function MembershipAppTab() {
                           size="sm"
                           variant="outline"
                           className="text-green-600 border-green-300 hover:bg-green-50 h-8 px-2 text-xs"
-                          onClick={() => approveMembershipApplication(app.userEmail)}
+                          onClick={() => approveMembershipApplication(app.applicationId)}
                         >
                           <Check className="h-3 w-3 mr-1" />
                           通过
@@ -763,7 +746,13 @@ function MembershipAppTab() {
         </CardContent>
       </Card>
 
-      <FilePreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} url={previewUrl} />
+      <FilePreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        url={preview.url}
+        fileName={preview.fileName}
+        title={preview.title}
+      />
 
       <RejectDialog
         open={!!rejectItem}
@@ -783,18 +772,18 @@ function WithdrawalAppTab() {
     rejectWithdrawalApplication,
   } = useAdmin();
 
-  const [previewUrl, setPreviewUrl] = useState("");
+  const [preview, setPreview] = useState<{ url: string; fileName?: string; title?: string }>({ url: "" });
   const [previewOpen, setPreviewOpen] = useState(false);
   const [rejectItem, setRejectItem] = useState<WithdrawalAppRecord | null>(null);
 
-  const handlePreview = (url: string) => {
-    setPreviewUrl(url);
+  const handlePreview = (url: string, fileName?: string, title?: string) => {
+    setPreview({ url, fileName, title });
     setPreviewOpen(true);
   };
 
   const handleReject = (reason: string) => {
     if (!rejectItem) return;
-    rejectWithdrawalApplication(rejectItem.userEmail, reason);
+    rejectWithdrawalApplication(rejectItem.applicationId, reason);
     setRejectItem(null);
   };
 
@@ -842,7 +831,7 @@ function WithdrawalAppTab() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handlePreview(app.applicationFileUrl)}
+                        onClick={() => handlePreview(app.applicationFileUrl, app.applicationFileName, "退会申请书预览")}
                       >
                         <Eye className="h-4 w-4 mr-1" />
                         查看
@@ -854,7 +843,7 @@ function WithdrawalAppTab() {
                           size="sm"
                           variant="outline"
                           className="text-green-600 border-green-300 hover:bg-green-50 h-8 px-2 text-xs"
-                          onClick={() => approveWithdrawalApplication(app.userEmail)}
+                          onClick={() => approveWithdrawalApplication(app.applicationId)}
                         >
                           <Check className="h-3 w-3 mr-1" />
                           通过
@@ -878,7 +867,13 @@ function WithdrawalAppTab() {
         </CardContent>
       </Card>
 
-      <FilePreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} url={previewUrl} />
+      <FilePreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        url={preview.url}
+        fileName={preview.fileName}
+        title={preview.title}
+      />
 
       <RejectDialog
         open={!!rejectItem}

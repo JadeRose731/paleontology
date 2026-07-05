@@ -9,20 +9,23 @@ import lombok.Data;
 import java.util.Date;
 
 @Data
-@TableName("paleo_member_profile")
-public class PaleoMemberProfile {
+@TableName("paleo_membership_application")
+public class PaleoMembershipApplication {
     @TableId(type = IdType.AUTO)
-    private Long profileId;
+    private Long applicationId;
     private Long userId;
-    private String userName;
-    private String memberStatus;
+    /** JOIN / WITHDRAW */
+    private String applicationType;
     private String memberCategory;
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private Date validStartDate;
-    @JsonFormat(pattern = "yyyy-MM-dd")
-    private Date validEndDate;
-    private Long latestApplicationId;
-    private Long latestPaymentId;
+    private String applicantName;
+    private String applicantPhone;
+    private String applicantEmail;
+    private String applicationFileUrl;
+    private String reviewStatus;
+    private String reviewComment;
+    private String reviewer;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date reviewTime;
     private String createBy;
     private Date createTime;
     private String updateBy;

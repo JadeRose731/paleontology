@@ -8,11 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Filter, Eye, UserPlus, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, BRANCH_MAP } from "@shared/constants";
+import { FilePreviewDialog } from "@/components/FilePreviewDialog";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -59,45 +59,6 @@ function StatusBadge({ status }: { status: string }) {
     <Badge variant="outline" className={colorMap[status] || "bg-gray-50 text-gray-500 border border-gray-200"}>
       {label}
     </Badge>
-  );
-}
-
-function ApplicationPreviewDialog({
-  open,
-  onOpenChange,
-  title,
-  fileUrl,
-  fileName,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  fileUrl: string;
-  fileName?: string;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
-        {fileUrl ? (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">{fileName || "申请书"}</p>
-            {fileUrl.startsWith("data:application/pdf") || fileUrl.endsWith(".pdf") ? (
-              <iframe src={fileUrl} title={fileName} className="w-full h-[60vh] border rounded" />
-            ) : (
-              <img src={fileUrl} alt={fileName} className="max-w-full rounded border object-contain" />
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <a href={fileUrl} download={fileName} target="_blank" rel="noopener noreferrer">下载原件</a>
-            </Button>
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-sm">暂无文件</p>
-        )}
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -229,11 +190,11 @@ function MemberDetailSheet({
           </div>
         )}
       </SheetContent>
-      <ApplicationPreviewDialog
+      <FilePreviewDialog
         open={!!preview}
         onOpenChange={(o) => { if (!o) setPreview(null); }}
-        title={preview?.title || ""}
-        fileUrl={preview?.url || ""}
+        title={preview?.title || "文件预览"}
+        url={preview?.url || ""}
         fileName={preview?.name}
       />
     </Sheet>

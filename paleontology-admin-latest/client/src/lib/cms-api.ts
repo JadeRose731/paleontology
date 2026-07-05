@@ -324,6 +324,8 @@ export interface ApiDashboardStats {
   studentNonMembers: number;
   nonStudentNonMembers: number;
   totalMembershipFee: number;
+  studentMembershipFeeAmount?: number;
+  nonStudentMembershipFeeAmount?: number;
   totalConferenceFee: number;
   activeConferences: number;
   branchMemberCounts: { name: string; count: number }[];

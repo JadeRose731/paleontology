@@ -21,6 +21,31 @@ import {
   CONFIRMED_PAYMENT_STATUSES,
   isDeadlinePassed,
 } from "@shared/constants";
+import {
+  clearUserToken,
+  cancelMembershipApplication,
+  createConferenceRegistration,
+  createMembershipApplication,
+  createMembershipPayment,
+  fetchMyMembershipApplications,
+  mapApiApplicationReviewStatus,
+  uploadMembershipApplicationFile,
+  dataUrlToFile,
+  fetchAuthInfo,
+  fetchMyConferenceRegistrations,
+  fetchMyMembershipPayments,
+  getUserToken,
+  loginUser,
+  mapApiPaymentStatus,
+  mapApiRegistrationToConferenceReg,
+  mapApiUserToLocal,
+  registerUser,
+  setUserToken,
+  updateUserTypeApi,
+  uploadConferenceRegistrationFile,
+  uploadMembershipPaymentFile,
+  type ApiMemberProfile,
+} from "@/lib/membership-api";
 
 /** 智能审核：工作日加算（与管理端一致） */
 function addWorkdays(dateStr: string, workdays: number): string {
@@ -85,6 +110,8 @@ export interface SocietyMembership {
   frozenDueToExpiry?: boolean;
   /** @deprecated 从 PaymentRecord 中读取金额，Phase 2 移除 */
   amount?: number;
+  /** 当前会员费缴费记录 ID */
+  currentPaymentId?: number;
   history: PaymentRecord[];
 }
 
@@ -126,6 +153,8 @@ export interface ConferenceReg {
   // 报名时锁定的费用类型与金额（不受后续身份变更影响）
   feeType?: ConferenceFeeType;
   lockedAmount?: number;
+  /** 后端报名记录 ID */
+  registrationId?: number;
   /** @deprecated 旧字段兼容，Phase 2 移除 */
   conferenceForm?: any;
   /** @deprecated 旧字段兼容，Phase 2 移除 */
@@ -185,6 +214,7 @@ export interface SystemNotification {
 
 // Phase 6: 入会/退会申请书数据
 export interface MembershipApplication {
+  applicationId?: number;
   status: string;          // application_submitted | application_rejected | application_approved
   applicationFileUrl: string;
   applicationFileName: string;
@@ -194,6 +224,7 @@ export interface MembershipApplication {
 }
 
 export interface WithdrawalApplication {
+  applicationId?: number;
   status: string;          // withdrawal_submitted | withdrawal_rejected | withdrawn
   applicationFileUrl: string;
   applicationFileName: string;
@@ -228,20 +259,20 @@ interface MembershipContextType {
   /** @deprecated Phase 2 将拆分为 submitMembershipVoucher + submitMembershipInvoice */
   applySocietyMembership: (voucherUrl: string, invoiceUrl: string, amount: number) => void;
   /** 阶段一：提交缴费凭证 */
-  submitMembershipVoucher: (voucherUrl: string, amount: number) => void;
+  submitMembershipVoucher: (voucherUrl: string, amount: number, fileName?: string) => Promise<boolean>;
   /** 阶段二：提交电子发票 */
-  submitMembershipInvoice: (invoiceUrl: string) => void;
+  submitMembershipInvoice: (invoiceUrl: string, fileName?: string) => Promise<boolean>;
 
   // 分会绑定/解绑（无需审核，仅需有效会员资格）
   toggleBranchBinding: (branchId: string) => void;
 
   // ── Conference actions（两阶段） ──
-  /** @deprecated Phase 2 将拆分为 submitConferenceVoucher + submitConferenceInvoice */
-  payConference: (confId: string, voucherUrl: string, invoiceUrl: string, amount: number) => void;
+  /** @deprecated Phase 2: 请使用 submitConferenceVoucher */
+  payConference: (confId: string, voucherUrl: string, invoiceUrl: string, amount: number) => Promise<boolean>;
   /** 阶段一：提交会议费凭证 */
-  submitConferenceVoucher: (confId: string, voucherUrl: string, amount: number) => void;
+  submitConferenceVoucher: (confId: string, voucherUrl: string, amount: number) => Promise<boolean>;
   /** 阶段二：提交会议费发票 */
-  submitConferenceInvoice: (confId: string, invoiceUrl: string) => void;
+  submitConferenceInvoice: (confId: string, invoiceUrl: string) => Promise<boolean>;
   submitConferenceForm: (confId: string, formData: Omit<ConferenceReg, "status" | "paymentVoucher" | "invoiceUrl">) => void;
   deleteAbstract: (confId: string) => void;
   uploadAbstract: (confId: string, fileName: string) => void;
@@ -249,28 +280,6 @@ interface MembershipContextType {
   uploadAbstractFile: (confId: string, fileUrl: string, fileName: string) => void;
   setAccommodation: (confId: string, type: AccommodationType) => void;
   toggleFieldTripRoute: (confId: string, phase: "pre" | "during" | "post", routeId: string) => void;
-
-  // ── 内部模拟审核（两阶段，演示用） ──
-  /** @deprecated Phase 2 拆分为初审/终审 */
-  simApproveSocietyMembership: () => void;
-  /** @deprecated Phase 2 拆分为初审/终审 */
-  simRejectSocietyMembership: (reason: string) => void;
-  /** @deprecated Phase 2 拆分为初审/终审 */
-  simApproveConference: (confId: string) => void;
-  /** @deprecated Phase 2 拆分为初审/终审 */
-  simRejectConference: (confId: string, reason: string) => void;
-
-  // 会员费两阶段审核
-  simApproveSocietyVoucher: () => void;
-  simRejectSocietyVoucher: (reason: string) => void;
-  simApproveSocietyInvoice: () => void;
-  simRejectSocietyInvoice: (reason: string) => void;
-
-  // 会议费两阶段审核
-  simApproveConferenceVoucher: (confId: string) => void;
-  simRejectConferenceVoucher: (confId: string, reason: string) => void;
-  simApproveConferenceInvoice: (confId: string) => void;
-  simRejectConferenceInvoice: (confId: string, reason: string) => void;
 
   // ── 宽限期与过期处理 ──
   /** 检查并更新逾期状态 */
@@ -298,18 +307,12 @@ interface MembershipContextType {
   // Phase 6: 入会/退会申请
   membershipApplication: MembershipApplication | null;
   withdrawalApplication: WithdrawalApplication | null;
-  submitMembershipApplication: (applicationFileUrl: string, applicationFileName: string) => void;
+  submitMembershipApplication: (applicationFileUrl: string, applicationFileName: string) => Promise<boolean>;
   cancelMembershipApplication: () => void;
-  submitWithdrawalApplication: (applicationFileUrl: string, applicationFileName: string) => void;
+  submitWithdrawalApplication: (applicationFileUrl: string, applicationFileName: string) => Promise<boolean>;
   cancelWithdrawalApplication: () => void;
   getMembershipApplicationTemplateUrl: () => string;
   getWithdrawalApplicationTemplateUrl: () => string;
-
-  // 入会/退会申请模拟审核（演示用，等同 Admin AuditWorkbench approve/reject）
-  simApproveMembershipApplication: () => void;
-  simRejectMembershipApplication: (reason: string) => void;
-  simApproveWithdrawalApplication: () => void;
-  simRejectWithdrawalApplication: (reason: string) => void;
 
   // General Helpers
   markNotificationRead: (id: string) => void;
@@ -407,53 +410,40 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   }, []);
 
-  // Phase 2: 轮询 localStorage，同步管理端 AuditWorkbench 审核结果到 React 状态
+  // 从后端同步会员费/会议报名状态
   useEffect(() => {
-    if (!currentUser) return;
-    const email = currentUser.email;
-
-    const syncAuditFromStorage = () => {
-      const storedMem = localStorage.getItem(`paleo_society_membership_${email}`);
-      if (storedMem) {
-        const parsed = JSON.parse(storedMem) as SocietyMembership;
-        setSocietyMembership((prev) =>
-          prev.status === parsed.status &&
-          prev.expiryDate === parsed.expiryDate &&
-          prev.applicationRejectReason === parsed.applicationRejectReason
-            ? prev
-            : parsed
-        );
-      }
-
-      const storedApp = localStorage.getItem(`paleo_membership_application_${email}`);
-      const nextApp = storedApp ? JSON.parse(storedApp) as MembershipApplication : null;
-      setMembershipApplication((prev) =>
-        JSON.stringify(prev) === JSON.stringify(nextApp) ? prev : nextApp
-      );
-
-      const storedWd = localStorage.getItem(`paleo_withdrawal_application_${email}`);
-      const nextWd = storedWd ? JSON.parse(storedWd) as WithdrawalApplication : null;
-      setWithdrawalApplication((prev) =>
-        JSON.stringify(prev) === JSON.stringify(nextWd) ? prev : nextWd
-      );
-
-      const storedType = localStorage.getItem(`paleo_user_type_${email}`);
-      if (storedType) {
-        setUserType((prev) => (prev === storedType ? prev : storedType as UserType));
+    if (!currentUser || !getUserToken()) return;
+    const syncFromApi = async () => {
+      try {
+        await syncBusinessStateFromApi(currentUser.email);
+      } catch {
+        // 静默失败，避免打断用户操作
       }
     };
-
-    syncAuditFromStorage();
-    const timer = window.setInterval(syncAuditFromStorage, 2500);
-    const onStorage = (e: StorageEvent) => {
-      if (!e.key || e.key.includes(email)) syncAuditFromStorage();
-    };
-    window.addEventListener("storage", onStorage);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("storage", onStorage);
-    };
+    syncFromApi();
+    const timer = window.setInterval(syncFromApi, 5000);
+    return () => window.clearInterval(timer);
   }, [currentUser?.email]);
+
+  // 启动时恢复登录态
+  useEffect(() => {
+    const token = getUserToken();
+    if (!token || currentUser) return;
+    fetchAuthInfo()
+      .then(({ user, profile }) => {
+        const mapped = mapApiUserToLocal(user);
+        setCurrentUser(mapped);
+        saveState("paleo_current_user", mapped);
+        setUserType((user.userType as UserType) || "regular");
+        setMembershipChoiceMade(user.membershipChoiceMade === "1");
+        loadUserState(user.email);
+        return syncBusinessStateFromApi(user.email, profile);
+      })
+      .catch(() => {
+        clearUserToken();
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 会员到期自动退会：超期未续费 → expired + 非会员身份
   useEffect(() => {
@@ -479,7 +469,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const storedBranches = localStorage.getItem(branchesKey);
     const parsedBranches: string[] = storedBranches ? JSON.parse(storedBranches) : [];
     // 有效的新格式分会 id（过滤掉旧的数字 id "1"~"6" 等历史残留数据）
-    const VALID_BRANCH_IDS = new Set(["gwjzdwxfh","kpgzwyh","bfxfh","wtxfh","hszlzwyh","gzwxfh","dqswx","gst","gjzdw","swcj","xjsxff"]);
+    const VALID_BRANCH_IDS = new Set(["zgswxh","gwjzdwxfh","kpgzwyh","bfxfh","wtxfh","hszlzwyh","gzwxfh","dqswx","gst","gjzdw","swcj","xjsxff"]);
     const cleanBranches = Array.from(new Set(parsedBranches.filter((id: string) => VALID_BRANCH_IDS.has(id))));
     setBoundBranches(cleanBranches);
     // 如果数据被清理了，同步写回 localStorage
@@ -510,6 +500,226 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setWithdrawalApplication(storedWd ? JSON.parse(storedWd) : null);
   };
 
+  const syncBusinessStateFromApi = async (email: string, profile?: ApiMemberProfile) => {
+    let resolvedProfile = profile;
+    if (!resolvedProfile && getUserToken()) {
+      try {
+        const info = await fetchAuthInfo();
+        resolvedProfile = info.profile;
+      } catch {
+        // 忽略 profile 拉取失败，继续使用其它数据源
+      }
+    }
+
+    const [payments, registrations, joinApps, withdrawApps] = await Promise.all([
+      fetchMyMembershipPayments(),
+      fetchMyConferenceRegistrations(),
+      fetchMyMembershipApplications("JOIN"),
+      fetchMyMembershipApplications("WITHDRAW"),
+    ]);
+
+    const latestPayment = payments[0];
+    const paymentStatus = latestPayment ? mapApiPaymentStatus(latestPayment.paymentStatus) : undefined;
+    const pendingJoin = joinApps.find((app) => app.reviewStatus === "PENDING");
+    const latestJoin = pendingJoin ?? joinApps.find((app) => app.reviewStatus === "APPROVED") ?? joinApps[0];
+    const pendingWithdraw = withdrawApps.find((app) => app.reviewStatus === "PENDING");
+    const latestWithdraw = pendingWithdraw ?? withdrawApps[0];
+    let membership: SocietyMembership = { ...DEFAULT_SOCIETY_MEMBERSHIP };
+    let nextMembershipApp: MembershipApplication | null = null;
+    let nextWithdrawalApp: WithdrawalApplication | null = null;
+
+    const paymentActive = latestPayment && paymentStatus && paymentStatus !== "unpaid";
+    const paymentInProgress = paymentActive && paymentStatus !== "confirmed";
+
+    if (pendingJoin) {
+      const appStatus = mapApiApplicationReviewStatus(pendingJoin.reviewStatus, "JOIN");
+      membership = {
+        ...membership,
+        status: appStatus as SocietyMembership["status"],
+        applicationRejectReason: undefined,
+        history: membership.history,
+      };
+      nextMembershipApp = {
+        applicationId: pendingJoin.applicationId,
+        status: appStatus,
+        applicationFileUrl: pendingJoin.applicationFileUrl || "",
+        applicationFileName: "入会申请书",
+        submitTime: pendingJoin.createTime || "",
+        reviewTime: pendingJoin.reviewTime,
+        rejectReason: pendingJoin.reviewComment,
+      };
+    } else if (pendingWithdraw) {
+      const wdStatus = mapApiApplicationReviewStatus(pendingWithdraw.reviewStatus, "WITHDRAW");
+      membership = {
+        ...membership,
+        status: wdStatus as SocietyMembership["status"],
+        history: membership.history,
+      };
+      nextWithdrawalApp = {
+        applicationId: pendingWithdraw.applicationId,
+        status: wdStatus,
+        applicationFileUrl: pendingWithdraw.applicationFileUrl || "",
+        applicationFileName: "退会申请书",
+        submitTime: pendingWithdraw.createTime || "",
+        reviewTime: pendingWithdraw.reviewTime,
+        rejectReason: pendingWithdraw.reviewComment,
+      };
+    } else if (paymentInProgress) {
+      const record: PaymentRecord = {
+        id: `rec-s-${latestPayment.paymentId}`,
+        type: "society_fee",
+        targetName: "中国古生物学会会员费",
+        amount: Number(latestPayment.amount || 0),
+        voucherUrl: latestPayment.voucherUrl || "",
+        invoiceUrl: latestPayment.invoiceUrl || "",
+        submitTime: latestPayment.createTime || new Date().toLocaleString("zh-CN"),
+        status: paymentStatus as PaymentRecord["status"],
+        rejectReason: latestPayment.reviewComment,
+      };
+      membership = {
+        ...membership,
+        status: paymentStatus as SocietyMembership["status"],
+        currentPaymentId: latestPayment.paymentId,
+        voucherRejectReason: paymentStatus === "voucher_rejected" ? latestPayment.reviewComment : undefined,
+        invoiceRejectReason: paymentStatus === "invoice_rejected" ? latestPayment.reviewComment : undefined,
+        expiryDate: undefined,
+        history: [record],
+      };
+    } else if (latestJoin?.reviewStatus === "APPROVED") {
+      membership = {
+        ...membership,
+        status: "application_approved",
+        history: membership.history,
+      };
+      nextMembershipApp = {
+        applicationId: latestJoin.applicationId,
+        status: "application_approved",
+        applicationFileUrl: latestJoin.applicationFileUrl || "",
+        applicationFileName: "入会申请书",
+        submitTime: latestJoin.createTime || "",
+        reviewTime: latestJoin.reviewTime,
+        rejectReason: latestJoin.reviewComment,
+      };
+    } else if (paymentActive && paymentStatus === "confirmed") {
+      const record: PaymentRecord = {
+        id: `rec-s-${latestPayment.paymentId}`,
+        type: "society_fee",
+        targetName: "中国古生物学会会员费",
+        amount: Number(latestPayment.amount || 0),
+        voucherUrl: latestPayment.voucherUrl || "",
+        invoiceUrl: latestPayment.invoiceUrl || "",
+        submitTime: latestPayment.createTime || new Date().toLocaleString("zh-CN"),
+        status: "approved",
+      };
+      membership = {
+        ...membership,
+        status: "active",
+        currentPaymentId: latestPayment.paymentId,
+        expiryDate: resolvedProfile?.validEndDate || undefined,
+        history: [record],
+      };
+    } else if (latestJoin && latestJoin.reviewStatus === "REJECTED") {
+      const appStatus = mapApiApplicationReviewStatus(latestJoin.reviewStatus, "JOIN");
+      membership = {
+        ...membership,
+        status: appStatus as SocietyMembership["status"],
+        applicationRejectReason: latestJoin.reviewComment,
+        history: membership.history,
+      };
+      nextMembershipApp = {
+        applicationId: latestJoin.applicationId,
+        status: appStatus,
+        applicationFileUrl: latestJoin.applicationFileUrl || "",
+        applicationFileName: "入会申请书",
+        submitTime: latestJoin.createTime || "",
+        reviewTime: latestJoin.reviewTime,
+        rejectReason: latestJoin.reviewComment,
+      };
+    } else if (resolvedProfile?.memberStatus === "ACTIVE") {
+      membership = {
+        ...membership,
+        status: "active",
+        expiryDate: resolvedProfile.validEndDate || undefined,
+      };
+    } else if (resolvedProfile?.memberStatus === "PENDING") {
+      membership = { ...membership, status: "application_approved", history: membership.history };
+    }
+
+    if (latestWithdraw && !pendingWithdraw) {
+      const wdStatus = mapApiApplicationReviewStatus(latestWithdraw.reviewStatus, "WITHDRAW");
+      if (wdStatus === "withdrawal_submitted") {
+        membership = { ...membership, status: "withdrawal_submitted", history: membership.history };
+      } else if (wdStatus === "withdrawn") {
+        membership = { ...membership, status: "withdrawn", history: membership.history };
+      }
+      nextWithdrawalApp = {
+        applicationId: latestWithdraw.applicationId,
+        status: wdStatus,
+        applicationFileUrl: latestWithdraw.applicationFileUrl || "",
+        applicationFileName: "退会申请书",
+        submitTime: latestWithdraw.createTime || "",
+        reviewTime: latestWithdraw.reviewTime,
+        rejectReason: latestWithdraw.reviewComment,
+      };
+    }
+
+    const confRegs: { [confId: string]: ConferenceReg } = {};
+    for (const reg of registrations) {
+      if (!reg.conferenceCode) continue;
+      const mapped = mapApiRegistrationToConferenceReg(reg);
+      confRegs[reg.conferenceCode] = {
+        ...mapped,
+        registrationId: reg.registrationId,
+        name: currentUser?.name || "",
+        gender: currentUser?.gender || "男",
+        unit: currentUser?.unit || "",
+        role: currentUser?.role || "教师",
+        status: mapped.status as ConferenceReg["status"],
+        feeType: mapped.feeType as ConferenceReg["feeType"],
+      };
+    }
+
+    setSocietyMembership(membership);
+    setConferenceRegs(confRegs);
+    setMembershipApplication(nextMembershipApp);
+    setWithdrawalApplication(nextWithdrawalApp);
+    saveState(`paleo_society_membership_${email}`, membership);
+    saveState(`paleo_confs_${email}`, confRegs);
+    if (nextMembershipApp) {
+      localStorage.setItem(`paleo_membership_application_${email}`, JSON.stringify(nextMembershipApp));
+    } else {
+      localStorage.removeItem(`paleo_membership_application_${email}`);
+    }
+    if (nextWithdrawalApp) {
+      localStorage.setItem(`paleo_withdrawal_application_${email}`, JSON.stringify(nextWithdrawalApp));
+    } else {
+      localStorage.removeItem(`paleo_withdrawal_application_${email}`);
+    }
+
+    if (getUserToken()) {
+      try {
+        const authInfo = await fetchAuthInfo();
+        let apiUserType = (authInfo.user.userType as UserType) || "regular";
+        if (membership.status === "active" && apiUserType !== "member") {
+          await updateUserTypeApi("member", true);
+          apiUserType = "member";
+        }
+        setUserType(apiUserType);
+        localStorage.setItem(`paleo_user_type_${email}`, apiUserType);
+        const choiceMade = membership.status === "active" || authInfo.user.membershipChoiceMade === "1";
+        setMembershipChoiceMade(choiceMade);
+        localStorage.setItem(`paleo_choice_made_${email}`, choiceMade ? "true" : "false");
+      } catch {
+        if (membership.status === "active") {
+          setUserType("member");
+          localStorage.setItem(`paleo_user_type_${email}`, "member");
+          setMembershipChoiceMade(true);
+          localStorage.setItem(`paleo_choice_made_${email}`, "true");
+        }
+      }
+    }
+  };
+
   /** 用户端写入时同步管理端 localStorage（Phase 1/2 双写策略） */
   const ADMIN_MIRROR_PREFIXES = ["paleo_confs_", "paleo_society_membership_", "paleo_bound_branches_"];
 
@@ -537,29 +747,6 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     localStorage.setItem("paleo_admin_all_users", JSON.stringify(adminUsers));
   };
 
-  const syncAdminApplication = (
-    email: string,
-    kind: "membership" | "withdrawal",
-    app: MembershipApplication | WithdrawalApplication | null
-  ) => {
-    const userKey =
-      kind === "membership"
-        ? `paleo_membership_application_${email}`
-        : `paleo_withdrawal_application_${email}`;
-    const adminKey =
-      kind === "membership"
-        ? `paleo_admin_membership_application_${email}`
-        : `paleo_admin_withdrawal_application_${email}`;
-    if (app) {
-      const payload = JSON.stringify(app);
-      localStorage.setItem(userKey, payload);
-      localStorage.setItem(adminKey, payload);
-    } else {
-      localStorage.removeItem(userKey);
-      localStorage.removeItem(adminKey);
-    }
-  };
-
   const addNotification = (notif: Omit<SystemNotification, "id" | "time" | "read">, email?: string) => {
     const newNotif: SystemNotification = {
       id: `notif-${Date.now()}`,
@@ -585,52 +772,46 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // ==========================================
 
   const register = (user: User, password: string): boolean => {
-    const users = JSON.parse(localStorage.getItem("paleo_user_db") || JSON.stringify(MOCK_USER_DB));
-
-    if (users.some((u: any) => u.email.toLowerCase() === user.email.toLowerCase())) {
-      toast.error("该邮箱已被注册，请直接登录。");
-      return false;
-    }
-
-    const newUser = { ...user, memberType: "普通会员" as MemberType };
-    const updatedUsers = [...users, { ...newUser, password }];
-    localStorage.setItem("paleo_user_db", JSON.stringify(updatedUsers));
-
-    const updatedAllUsers = [...allUsers, newUser];
-    setAllUsers(updatedAllUsers);
-    saveState("paleo_all_users", updatedAllUsers);
-
-    // 初始化新用户的数据
-    const email = user.email;
-    localStorage.setItem(`paleo_society_membership_${email}`, JSON.stringify(DEFAULT_SOCIETY_MEMBERSHIP));
-    localStorage.setItem(`paleo_bound_branches_${email}`, JSON.stringify([]));
-    localStorage.setItem(`paleo_confs_${email}`, JSON.stringify({}));
-    localStorage.setItem(`paleo_notifs_${email}`, JSON.stringify(DEFAULT_NOTIFICATIONS));
-    // 同步管理端 registry（AuditWorkbench 可读）
-    localStorage.setItem(`paleo_admin_society_membership_${email}`, JSON.stringify(DEFAULT_SOCIETY_MEMBERSHIP));
-    localStorage.setItem(`paleo_admin_bound_branches_${email}`, JSON.stringify([]));
-    localStorage.setItem(`paleo_admin_confs_${email}`, JSON.stringify({}));
-    syncAdminUserRegistry(newUser);
-
-    toast.success("账号注册成功！请登录后前往【学会服务 → 会员服务】缴纳会员费，成为正式会员。");
+    void (async () => {
+      try {
+        const data = await registerUser({
+          email: user.email,
+          name: user.name,
+          gender: user.gender,
+          unit: user.unit,
+          role: user.role,
+          isStudent: user.isStudent ?? user.role === "学生",
+          title: user.title,
+        }, password);
+        const mapped = mapApiUserToLocal(data.user);
+        setCurrentUser(mapped);
+        saveState("paleo_current_user", mapped);
+        loadUserState(user.email);
+        await syncBusinessStateFromApi(user.email, data.profile);
+        toast.success("账号注册成功！请登录后前往【学会服务 → 会员服务】完成会员路径选择。");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "注册失败");
+      }
+    })();
     return true;
   };
 
   const login = (email: string, password: string): boolean => {
-    const users = JSON.parse(localStorage.getItem("paleo_user_db") || JSON.stringify(MOCK_USER_DB));
-    const matched = users.find((u: any) => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-
-    if (!matched) {
-      toast.error("邮箱或密码错误，请重试。");
-      return false;
-    }
-
-    const { password: _, ...userProfile } = matched;
-    setCurrentUser(userProfile);
-    saveState("paleo_current_user", userProfile);
-    loadUserState(email);
-
-    toast.success(`欢迎回来，${matched.name}！`);
+    void (async () => {
+      try {
+        const data = await loginUser(email, password);
+        const mapped = mapApiUserToLocal(data.user);
+        setCurrentUser(mapped);
+        saveState("paleo_current_user", mapped);
+        setUserType((data.user.userType as UserType) || "regular");
+        setMembershipChoiceMade(data.user.membershipChoiceMade === "1");
+        loadUserState(email);
+        await syncBusinessStateFromApi(email, data.profile);
+        toast.success(`欢迎回来，${mapped.name}！`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "登录失败");
+      }
+    })();
     return true;
   };
 
@@ -651,6 +832,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setNotifications([]);
     setUserType("regular");
     setMembershipChoiceMade(false);
+    clearUserToken();
     toast.info("您已安全退出登录。");
   };
 
@@ -729,85 +911,85 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   /** 阶段一：提交缴费凭证 → status = voucher_submitted */
-  const submitMembershipVoucher = (voucherUrl: string, amount: number) => {
-    if (!currentUser) { toast.error("请先登录系统。"); return; }
+  const submitMembershipVoucher = async (voucherUrl: string, amount: number, fileName?: string): Promise<boolean> => {
+    if (!currentUser) { toast.error("请先登录系统。"); return false; }
+    if (!getUserToken()) { toast.error("登录已过期，请重新登录。"); return false; }
 
-    const payableStatuses: MembershipStatus[] = [
+    const payableStatuses: (MembershipStatus | "unpaid")[] = [
       "application_approved",
       "expired",
       "voucher_rejected",
       "invoice_rejected",
       "invoice_pending",
       "invoice_overdue",
+      "unpaid",
+      "not_member",
     ];
     if (userType === "member" && !payableStatuses.includes(societyMembership.status as MembershipStatus)) {
       toast.error("请先提交入会申请书并通过管理员审核后，再缴纳会费。");
-      return;
+      return false;
     }
 
-    const newRecord: PaymentRecord = {
-      id: `rec-s-${Date.now()}`,
-      type: "society_fee",
-      targetName: "中国古生物学会会员费",
-      amount,
-      voucherUrl,
-      invoiceUrl: "",
-      submitTime: new Date().toLocaleString("zh-CN"),
-      status: "voucher_submitted"
-    };
+    try {
+      const feeType = deriveFeeType(userType, currentUser.isStudent ?? (currentUser.role === "学生"));
+      const payment = await createMembershipPayment(amount, feeType);
+      const paymentId = payment.paymentId;
+      if (!paymentId) throw new Error("创建缴费记录失败");
 
-    const updatedMembership: SocietyMembership = smartApproveVoucherMembership({
-      ...societyMembership,
-      status: "voucher_submitted",
-      history: [newRecord, ...societyMembership.history]
-    });
+      await uploadMembershipPaymentFile(
+        paymentId,
+        "voucher",
+        dataUrlToFile({ name: fileName || "voucher", dataUrl: voucherUrl }),
+      );
+      await syncBusinessStateFromApi(currentUser.email);
 
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${currentUser.email}`, updatedMembership);
-
-    addNotification({
-      title: "学会会员费凭证已通过智能初审",
-      content: `您提交的会员费凭证（¥${amount}）已通过智能审核。请在 ${updatedMembership.invoiceDeadline} 前上传电子发票。`,
-      type: "success"
-    });
-
-    toast.success("会员费凭证已提交，智能审核已通过初审，请上传电子发票。");
+      addNotification({
+        title: "会员费凭证已提交",
+        content: `您提交的会员费凭证（¥${amount}）已进入审核队列，请等待管理员初审（通常 1-3 个工作日）。`,
+        type: "info",
+      });
+      toast.success("会员费凭证已提交，请等待管理员审核。");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "提交失败");
+      return false;
+    }
   };
 
   /** 阶段二：提交电子发票 → status = invoice_submitted */
-  const submitMembershipInvoice = (invoiceUrl: string) => {
-    if (!currentUser) { toast.error("请先登录系统。"); return; }
+  const submitMembershipInvoice = async (invoiceUrl: string, fileName?: string): Promise<boolean> => {
+    if (!currentUser) { toast.error("请先登录系统。"); return false; }
+    if (!getUserToken()) { toast.error("登录已过期，请重新登录。"); return false; }
 
     if (societyMembership.status !== "invoice_pending" && societyMembership.status !== "invoice_overdue") {
       toast.error("请先等待凭证初审通过后再上传发票。");
-      return;
+      return false;
+    }
+    const paymentId = societyMembership.currentPaymentId;
+    if (!paymentId) {
+      toast.error("未找到有效的会员费记录，请重新提交凭证。");
+      return false;
     }
 
-    const updatedHistory = societyMembership.history.map(h =>
-      (h.status === "voucher_submitted" || h.status === "invoice_submitted") && h.type === "society_fee"
-        ? { ...h, invoiceUrl, status: "invoice_submitted" as const, submitTime: h.submitTime }
-        : h
-    );
+    try {
+      await uploadMembershipPaymentFile(
+        paymentId,
+        "invoice",
+        dataUrlToFile({ name: fileName || "invoice", dataUrl: invoiceUrl }),
+      );
+      await syncBusinessStateFromApi(currentUser.email);
 
-    const afterInvoiceSubmit: SocietyMembership = {
-      ...societyMembership,
-      status: "invoice_submitted",
-      history: updatedHistory
-    };
-    // 发票提交后停在 invoice_submitted 状态，由管理员/用户手动触发模拟终审
-    // （不再自动调用 smartApproveInvoiceMembership，让用户看到「模拟终审通过」按钮）
-    const updatedMembership = afterInvoiceSubmit;
-
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${currentUser.email}`, updatedMembership);
-
-    addNotification({
-      title: "电子发票已提交，等待财务终审",
-      content: "您的电子发票已提交，财务人员正在进行终审，通过后会员资格将正式生效。",
-      type: "info"
-    });
-
-    toast.success("电子发票已提交！请在左侧点击「终审通过」完成最后一步。");
+      addNotification({
+        title: "电子发票已提交，等待财务终审",
+        content: "您的电子发票已提交，财务人员正在进行终审，通过后会员资格将正式生效。",
+        type: "info",
+      });
+      toast.success("电子发票已提交，请等待管理员终审。");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "提交失败");
+      return false;
+    }
   };
 
   // ==========================================
@@ -854,105 +1036,104 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // ==========================================
 
   /** @deprecated Phase 2: 请使用 submitConferenceVoucher */
-  const payConference = (confId: string, voucherUrl: string, invoiceUrl: string, amount: number) => {
-    submitConferenceVoucher(confId, voucherUrl, amount);
+  const payConference = async (confId: string, voucherUrl: string, _invoiceUrl: string, amount: number) => {
+    return submitConferenceVoucher(confId, voucherUrl, amount);
   };
 
   /** 阶段一：提交会议费凭证 → status = voucher_submitted */
-  const submitConferenceVoucher = (confId: string, voucherUrl: string, amount: number) => {
-    if (!currentUser) return;
+  const submitConferenceVoucher = async (confId: string, voucherUrl: string, amount: number): Promise<boolean> => {
+    if (!currentUser) { toast.error("请先登录系统。"); return false; }
+    if (!getUserToken()) { toast.error("登录已过期，请重新登录。"); return false; }
 
     if (userType === "regular") {
       toast.error("请先选择您的参与方式（会员/非会员）后再报名会议。");
-      return;
+      return false;
     }
     if (userType === "member" && societyMembership.status !== "active" && societyMembership.status !== "invoice_pending" && societyMembership.status !== "invoice_submitted") {
       toast.error("您尚未完成会员缴费验证，请先前往会员服务完成入会流程后再报名会议。");
-      return;
+      return false;
     }
 
     const confTitle = getConferenceTitle(confId);
     const confBranchId = getConferenceBranchId(confId);
     if (confBranchId && !isSocietyAccessible(boundBranches, confBranchId)) {
       toast.error(`您需要先绑定该会议所属的分会（${getBranchName(confBranchId)}），才能缴纳会议注册费。`);
-      return;
+      return false;
     }
 
     const feeType = deriveFeeType(userType, currentUser.isStudent ?? (currentUser.role === "学生"));
     const lockedAmount = getConferenceFeeByType(confId, feeType);
     if (lockedAmount <= 0) {
       toast.error("当前身份暂不支持报名该会议，请联系学会管理员。");
-      return;
+      return false;
     }
 
-    const afterVoucher: ConferenceReg = {
-      ...(conferenceRegs[confId] || {
-        name: currentUser.name,
-        gender: currentUser.gender,
-        unit: currentUser.unit,
-        role: currentUser.role,
-        accommodation: "自行安排",
-        session: "待选择",
-        presentationType: "仅参会"
-      }),
-      status: "voucher_submitted",
-      paymentVoucher: voucherUrl,
-      feeType,
-      lockedAmount,
-      voucherSubmitTime: new Date().toLocaleString("zh-CN"),
-      lastUpdated: new Date().toLocaleString("zh-CN")
-    };
-    const updatedReg = smartApproveVoucherConference(afterVoucher);
+    try {
+      const reg = await createConferenceRegistration(confId, feeType, lockedAmount);
+      const registrationId = reg.registrationId;
+      if (!registrationId) throw new Error("创建会议报名记录失败");
 
-    const updatedRegs = { ...conferenceRegs, [confId]: updatedReg };
-    setConferenceRegs(updatedRegs);
-    saveState(`paleo_confs_${currentUser.email}`, updatedRegs);
+      await uploadConferenceRegistrationFile(
+        registrationId,
+        "voucher",
+        dataUrlToFile({ name: "conference-voucher", dataUrl: voucherUrl }),
+      );
+      await syncBusinessStateFromApi(currentUser.email);
 
-    addNotification({
-      title: "会议注册费凭证已通过智能初审",
-      content: `【${confTitle}】凭证已通过智能审核（¥${lockedAmount}）。请在 ${updatedReg.invoiceDeadline} 前上传电子发票并填写参会信息。`,
-      type: "success"
-    });
-
-    toast.success(`【${confTitle}】凭证已通过智能初审，请上传电子发票。`);
+      addNotification({
+        title: "会议注册费凭证已提交",
+        content: `【${confTitle}】凭证（¥${lockedAmount}）已提交，请等待管理员初审（通常 1-3 个工作日）。`,
+        type: "info",
+      });
+      toast.success(`【${confTitle}】凭证已提交，请等待管理员审核。`);
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "提交失败");
+      return false;
+    }
   };
 
   /** 阶段二：提交会议费发票 + OCR 模拟比对 → status = invoice_submitted */
-  const submitConferenceInvoice = (confId: string, invoiceUrl: string) => {
-    if (!currentUser) return;
+  const submitConferenceInvoice = async (confId: string, invoiceUrl: string): Promise<boolean> => {
+    if (!currentUser) { toast.error("请先登录系统。"); return false; }
+    if (!getUserToken()) { toast.error("登录已过期，请重新登录。"); return false; }
 
     const currentReg = conferenceRegs[confId];
     if (!currentReg) {
       toast.error("请先提交会议注册费凭证。");
-      return;
+      return false;
     }
 
     if (currentReg.status !== "invoice_pending" && currentReg.status !== "invoice_overdue") {
       toast.error("请先等待凭证初审通过后再上传发票。");
-      return;
+      return false;
+    }
+    const registrationId = currentReg.registrationId;
+    if (!registrationId) {
+      toast.error("未找到有效的会议报名记录，请重新提交凭证。");
+      return false;
     }
 
-    const afterInvoice: ConferenceReg = {
-      ...currentReg,
-      status: "invoice_submitted",
-      invoiceUrl,
-      invoiceSubmitTime: new Date().toLocaleString("zh-CN"),
-      lastUpdated: new Date().toLocaleString("zh-CN")
-    };
-    const updatedReg = smartApproveInvoiceConference(afterInvoice);
+    try {
+      await uploadConferenceRegistrationFile(
+        registrationId,
+        "invoice",
+        dataUrlToFile({ name: "conference-invoice", dataUrl: invoiceUrl }),
+      );
+      await syncBusinessStateFromApi(currentUser.email);
 
-    const updatedRegs = { ...conferenceRegs, [confId]: updatedReg };
-    setConferenceRegs(updatedRegs);
-    saveState(`paleo_confs_${currentUser.email}`, updatedRegs);
-
-    const confTitle = getConferenceTitle(confId);
-    addNotification({
-      title: "会议报名已确认",
-      content: `【${confTitle}】发票已通过智能终审，报名已确认。您现在可以填写摘要、住宿和野外考察信息。`,
-      type: "success"
-    });
-
-    toast.success("电子发票已通过智能终审，报名已确认。");
+      const confTitle = getConferenceTitle(confId);
+      addNotification({
+        title: "会议费发票已提交",
+        content: `【${confTitle}】电子发票已提交，请等待管理员终审。`,
+        type: "info",
+      });
+      toast.success("电子发票已提交，请等待管理员终审。");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "提交失败");
+      return false;
+    }
   };
 
   const submitConferenceForm = (confId: string, formData: Omit<ConferenceReg, "status" | "paymentVoucher" | "invoiceUrl">) => {
@@ -1068,310 +1249,6 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const updatedRegs = { ...conferenceRegs, [confId]: updatedReg };
     setConferenceRegs(updatedRegs);
     saveState(`paleo_confs_${currentUser.email}`, updatedRegs);
-  };
-
-  // ==========================================
-  // 内部模拟审核 —— 两阶段（演示用）
-  // ==========================================
-
-  /** 计算发票上传截止日：起始日 + 7 个工作日 */
-  const calculateInvoiceDeadline = (fromDate?: string): string => {
-    const d = fromDate ? new Date(fromDate) : new Date();
-    let added = 0;
-    while (added < 7) {
-      d.setDate(d.getDate() + 1);
-      const day = d.getDay();
-      if (day !== 0 && day !== 6) { added++; }
-    }
-    return d.toISOString().split("T")[0];
-  };
-
-  // ── 旧的单阶段函数（@deprecated，委托到两阶段） ──
-
-  /** @deprecated 请使用 simApproveSocietyVoucher / simApproveSocietyInvoice */
-  const simApproveSocietyMembership = () => {
-    const status = societyMembership.status;
-    if (status === "voucher_submitted" || status === "pending") {
-      simApproveSocietyVoucher();
-    } else if (status === "invoice_submitted") {
-      simApproveSocietyInvoice();
-    }
-  };
-
-  /** @deprecated 请使用 simRejectSocietyVoucher / simRejectSocietyInvoice */
-  const simRejectSocietyMembership = (reason: string) => {
-    const status = societyMembership.status;
-    if (status === "voucher_submitted" || status === "pending") {
-      simRejectSocietyVoucher(reason);
-    } else if (status === "invoice_submitted") {
-      simRejectSocietyInvoice(reason);
-    }
-  };
-
-  /** @deprecated 请使用 simApproveConferenceVoucher / simApproveConferenceInvoice */
-  const simApproveConference = (confId: string) => {
-    const reg = conferenceRegs[confId];
-    if (!reg) return;
-    if (reg.status === "voucher_submitted" || reg.status === "pending") {
-      simApproveConferenceVoucher(confId);
-    } else if (reg.status === "invoice_submitted") {
-      simApproveConferenceInvoice(confId);
-    }
-  };
-
-  /** @deprecated 请使用 simRejectConferenceVoucher / simRejectConferenceInvoice */
-  const simRejectConference = (confId: string, reason: string) => {
-    const reg = conferenceRegs[confId];
-    if (!reg) return;
-    if (reg.status === "voucher_submitted" || reg.status === "pending") {
-      simRejectConferenceVoucher(confId, reason);
-    } else if (reg.status === "invoice_submitted") {
-      simRejectConferenceInvoice(confId, reason);
-    }
-  };
-
-  // ── 会员费两阶段模拟审核（新） ──
-
-  /** 凭证初审通过 → status = invoice_pending，设置发票截止日 */
-  const simApproveSocietyVoucher = () => {
-    if (!currentUser) return;
-
-    const deadline = calculateInvoiceDeadline();
-    const updatedHistory = societyMembership.history.map(h =>
-      (h.status === "voucher_submitted" || h.status === "pending") && h.type === "society_fee"
-        ? { ...h, status: "approved" as const, auditTime: new Date().toLocaleString("zh-CN") }
-        : h
-    );
-
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "invoice_pending",
-      invoiceDeadline: deadline,
-      history: updatedHistory
-    };
-
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${currentUser.email}`, updatedMembership);
-
-    addNotification({
-      title: "学会会员费凭证初审已通过",
-      content: `凭证初审已通过！请于 ${deadline} 前上传电子发票。您现在可以绑定专业分会。`,
-      type: "success"
-    });
-
-    toast.success("凭证初审通过！请上传电子发票完成终审。");
-  };
-
-  /** 凭证初审驳回 → status = voucher_rejected */
-  const simRejectSocietyVoucher = (reason: string) => {
-    if (!currentUser) return;
-
-    const updatedHistory = societyMembership.history.map(h =>
-      (h.status === "voucher_submitted" || h.status === "pending") && h.type === "society_fee"
-        ? { ...h, status: "rejected" as const, auditTime: new Date().toLocaleString("zh-CN"), rejectReason: reason }
-        : h
-    );
-
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "voucher_rejected",
-      voucherRejectReason: reason,
-      history: updatedHistory
-    };
-
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${currentUser.email}`, updatedMembership);
-
-    addNotification({
-      title: "会员费凭证被驳回",
-      content: `您提交的学会会员费凭证初审被驳回。原因：${reason}。请重新上传清晰的缴费凭证。`,
-      type: "warning"
-    });
-
-    toast.error(`凭证驳回：${reason}`);
-  };
-
-  /** 发票终审通过 → status = active，设置有效期 */
-  const simApproveSocietyInvoice = () => {
-    if (!currentUser) return;
-
-    const d = new Date();
-    d.setFullYear(d.getFullYear() + 1);
-    const expiryStr = d.toISOString().split("T")[0];
-
-    const updatedHistory = societyMembership.history.map(h =>
-      (h.status === "invoice_submitted") && h.type === "society_fee"
-        ? { ...h, status: "approved" as const, auditTime: new Date().toLocaleString("zh-CN") }
-        : h
-    );
-
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "active",
-      expiryDate: expiryStr,
-      invoiceDeadline: undefined,
-      invoiceExtendedDeadline: undefined,
-      history: updatedHistory
-    };
-
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${currentUser.email}`, updatedMembership);
-
-    addNotification({
-      title: "学会会员资格已生效",
-      content: `发票终审已通过！会员资格正式生效，有效期至 ${expiryStr}。您现在可以绑定专业分会并参加学术会议。`,
-      type: "success"
-    });
-
-    toast.success(`会员资格已生效，有效期至 ${expiryStr}。`);
-  };
-
-  /** 发票终审驳回 → status = invoice_rejected */
-  const simRejectSocietyInvoice = (reason: string) => {
-    if (!currentUser) return;
-
-    const updatedHistory = societyMembership.history.map(h =>
-      h.status === "invoice_submitted" && h.type === "society_fee"
-        ? { ...h, status: "rejected" as const, auditTime: new Date().toLocaleString("zh-CN"), rejectReason: reason }
-        : h
-    );
-
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "invoice_rejected",
-      invoiceRejectReason: reason,
-      history: updatedHistory
-    };
-
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${currentUser.email}`, updatedMembership);
-
-    addNotification({
-      title: "会员费发票被驳回",
-      content: `您提交的电子发票终审被驳回。原因：${reason}。请重新上传发票。`,
-      type: "warning"
-    });
-
-    toast.error(`发票驳回：${reason}`);
-  };
-
-  // ── 会议费两阶段模拟审核（新） ──
-
-  /** 凭证初审通过 → status = invoice_pending，设置发票截止日，解锁参会信息填写 */
-  const simApproveConferenceVoucher = (confId: string) => {
-    if (!currentUser) return;
-
-    const currentReg = conferenceRegs[confId];
-    if (!currentReg) return;
-
-    const deadline = calculateInvoiceDeadline();
-    const confTitle = getConferenceTitle(confId);
-
-    const updatedReg: ConferenceReg = {
-      ...currentReg,
-      status: "invoice_pending",
-      voucherAuditTime: new Date().toLocaleString("zh-CN"),
-      invoiceDeadline: deadline,
-      lastUpdated: new Date().toLocaleString("zh-CN")
-    };
-
-    const updatedRegs = { ...conferenceRegs, [confId]: updatedReg };
-    setConferenceRegs(updatedRegs);
-    saveState(`paleo_confs_${currentUser.email}`, updatedRegs);
-
-    addNotification({
-      title: "会议费凭证初审已通过",
-      content: `【${confTitle}】凭证初审已通过！请于 ${deadline} 前上传电子发票。您现在可以填写参会信息。`,
-      type: "success"
-    });
-
-    toast.success(`【${confTitle}】凭证初审通过！请填写参会信息并上传发票。`);
-  };
-
-  /** 凭证初审驳回 → status = voucher_rejected */
-  const simRejectConferenceVoucher = (confId: string, reason: string) => {
-    if (!currentUser) return;
-
-    const currentReg = conferenceRegs[confId];
-    if (!currentReg) return;
-
-    const confTitle = getConferenceTitle(confId);
-    const updatedReg: ConferenceReg = {
-      ...currentReg,
-      status: "voucher_rejected",
-      voucherRejectReason: reason,
-      voucherAuditTime: new Date().toLocaleString("zh-CN"),
-      lastUpdated: new Date().toLocaleString("zh-CN")
-    };
-
-    const updatedRegs = { ...conferenceRegs, [confId]: updatedReg };
-    setConferenceRegs(updatedRegs);
-    saveState(`paleo_confs_${currentUser.email}`, updatedRegs);
-
-    addNotification({
-      title: "会议费凭证被驳回",
-      content: `【${confTitle}】凭证初审被驳回。原因：${reason}。请重新上传清晰的缴费凭证。`,
-      type: "warning"
-    });
-
-    toast.error(`【${confTitle}】凭证驳回：${reason}`);
-  };
-
-  /** 发票终审通过 → status = confirmed */
-  const simApproveConferenceInvoice = (confId: string) => {
-    if (!currentUser) return;
-
-    const currentReg = conferenceRegs[confId];
-    if (!currentReg) return;
-
-    const confTitle = getConferenceTitle(confId);
-    const updatedReg: ConferenceReg = {
-      ...currentReg,
-      status: "confirmed",
-      invoiceAuditTime: new Date().toLocaleString("zh-CN"),
-      lastUpdated: new Date().toLocaleString("zh-CN")
-    };
-
-    const updatedRegs = { ...conferenceRegs, [confId]: updatedReg };
-    setConferenceRegs(updatedRegs);
-    saveState(`paleo_confs_${currentUser.email}`, updatedRegs);
-
-    addNotification({
-      title: "会议报名已确认",
-      content: `【${confTitle}】发票终审已通过！您已获得正式参会资格。`,
-      type: "success"
-    });
-
-    toast.success(`【${confTitle}】报名已确认！`);
-  };
-
-  /** 发票终审驳回 → status = invoice_rejected */
-  const simRejectConferenceInvoice = (confId: string, reason: string) => {
-    if (!currentUser) return;
-
-    const currentReg = conferenceRegs[confId];
-    if (!currentUser) return;
-
-    const confTitle = getConferenceTitle(confId);
-    const updatedReg: ConferenceReg = {
-      ...currentReg,
-      status: "invoice_rejected",
-      invoiceRejectReason: reason,
-      invoiceAuditTime: new Date().toLocaleString("zh-CN"),
-      lastUpdated: new Date().toLocaleString("zh-CN")
-    };
-
-    const updatedRegs = { ...conferenceRegs, [confId]: updatedReg };
-    setConferenceRegs(updatedRegs);
-    saveState(`paleo_confs_${currentUser.email}`, updatedRegs);
-
-    addNotification({
-      title: "会议费发票被驳回",
-      content: `【${confTitle}】电子发票终审被驳回。原因：${reason}。请重新上传发票。`,
-      type: "warning"
-    });
-
-    toast.error(`【${confTitle}】发票驳回：${reason}`);
   };
 
   // ── 宽限期与过期处理 ──
@@ -1565,131 +1442,160 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // ==========================================
 
   /** 提交入会申请书 → status = application_submitted */
-  const submitMembershipApplicationAction = (applicationFileUrl: string, applicationFileName: string) => {
-    if (!currentUser) { toast.error("请先登录系统。"); return; }
+  const submitMembershipApplicationAction = async (applicationFileUrl: string, applicationFileName: string): Promise<boolean> => {
+    if (!currentUser) { toast.error("请先登录系统。"); return false; }
+    if (!getUserToken()) { toast.error("登录已过期，请重新登录。"); return false; }
 
-    const app: MembershipApplication = {
-      status: "application_submitted",
-      applicationFileUrl,
-      applicationFileName,
-      submitTime: new Date().toLocaleString("zh-CN"),
-    };
+    try {
+      const existing = await fetchMyMembershipApplications("JOIN");
+      if (existing.some((app) => app.reviewStatus === "PENDING")) {
+        await syncBusinessStateFromApi(currentUser.email);
+        toast.info("您已有待审核的入会申请，请等待管理员审核。");
+        return true;
+      }
 
-    setMembershipApplication(app);
-    const email = currentUser.email;
-    syncAdminApplication(email, "membership", app);
-    syncAdminUserRegistry(currentUser);
+      const feeType = deriveFeeType(userType, currentUser.isStudent ?? (currentUser.role === "学生"));
+      const created = await createMembershipApplication({
+        applicationType: "JOIN",
+        applicantName: currentUser.name,
+        applicantEmail: currentUser.email,
+        memberCategory: feeType,
+      });
+      if (!created.applicationId) throw new Error("创建入会申请失败");
 
-    // 同步更新会员状态
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "application_submitted",
-      history: societyMembership.history,
-    };
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${email}`, updatedMembership);
+      await uploadMembershipApplicationFile(
+        created.applicationId,
+        dataUrlToFile({ name: applicationFileName, dataUrl: applicationFileUrl }),
+      );
 
-    addNotification({
-      title: "入会申请书已提交",
-      content: "您的入会申请书已成功提交，管理员将在1-3个工作日内审核。审核通过后即可缴纳会费。",
-      type: "info",
-    });
+      const optimisticApp: MembershipApplication = {
+        applicationId: created.applicationId,
+        status: "application_submitted",
+        applicationFileUrl,
+        applicationFileName,
+        submitTime: new Date().toISOString(),
+      };
+      const optimisticMembership: SocietyMembership = {
+        ...societyMembership,
+        status: "application_submitted",
+        history: societyMembership.history,
+      };
+      setMembershipApplication(optimisticApp);
+      setSocietyMembership(optimisticMembership);
+      saveState(`paleo_society_membership_${currentUser.email}`, optimisticMembership);
 
-    toast.success("入会申请书已提交，请等待管理员审核。");
+      await syncBusinessStateFromApi(currentUser.email);
+
+      addNotification({
+        title: "入会申请书已提交",
+        content: "您的入会申请书已成功提交，管理员将在1-3个工作日内审核。审核通过后即可缴纳会费。",
+        type: "info",
+      });
+      toast.success("入会申请书已提交，请等待管理员审核。");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "提交失败");
+      return false;
+    }
   };
 
   /** 取消入会申请（仅在审核中时可用） */
-  const cancelMembershipApplicationAction = () => {
+  const cancelMembershipApplicationAction = async () => {
     if (!currentUser) { toast.error("请先登录系统。"); return; }
-    if (!membershipApplication || membershipApplication.status !== "application_submitted") {
+    if (!membershipApplication?.applicationId) {
       toast.error("当前没有待审核的入会申请。");
       return;
     }
 
-    setMembershipApplication(null);
-    const email = currentUser.email;
-    syncAdminApplication(email, "membership", null);
+    try {
+      await cancelMembershipApplication(membershipApplication.applicationId);
+      setMembershipApplication(null);
+      const updatedMembership: SocietyMembership = {
+        ...societyMembership,
+        status: "not_member",
+        history: societyMembership.history,
+      };
+      setSocietyMembership(updatedMembership);
+      saveState(`paleo_society_membership_${currentUser.email}`, updatedMembership);
 
-    // 恢复会员状态
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "not_member",
-      history: societyMembership.history,
-    };
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${email}`, updatedMembership);
-
-    addNotification({
-      title: "入会申请已取消",
-      content: "您的入会申请书已取消。",
-      type: "info",
-    });
-
-    toast.info("入会申请已取消。");
+      addNotification({
+        title: "入会申请已取消",
+        content: "您的入会申请书已取消。",
+        type: "info",
+      });
+      toast.info("入会申请已取消。");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "取消失败");
+    }
   };
 
   /** 提交退会申请书 → status = withdrawal_submitted */
-  const submitWithdrawalApplicationAction = (applicationFileUrl: string, applicationFileName: string) => {
-    if (!currentUser) { toast.error("请先登录系统。"); return; }
+  const submitWithdrawalApplicationAction = async (applicationFileUrl: string, applicationFileName: string): Promise<boolean> => {
+    if (!currentUser) { toast.error("请先登录系统。"); return false; }
+    if (!getUserToken()) { toast.error("登录已过期，请重新登录。"); return false; }
 
-    const app: WithdrawalApplication = {
-      status: "withdrawal_submitted",
-      applicationFileUrl,
-      applicationFileName,
-      submitTime: new Date().toLocaleString("zh-CN"),
-    };
+    try {
+      const existing = await fetchMyMembershipApplications("WITHDRAW");
+      if (existing.some((app) => app.reviewStatus === "PENDING")) {
+        await syncBusinessStateFromApi(currentUser.email);
+        toast.error("您已有待审核的退会申请，请勿重复提交。");
+        return false;
+      }
 
-    setWithdrawalApplication(app);
-    const email = currentUser.email;
-    syncAdminApplication(email, "withdrawal", app);
-    syncAdminUserRegistry(currentUser);
+      const created = await createMembershipApplication({
+        applicationType: "WITHDRAW",
+        applicantName: currentUser.name,
+        applicantEmail: currentUser.email,
+      });
+      if (!created.applicationId) throw new Error("创建退会申请失败");
 
-    // 同步更新会员状态
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "withdrawal_submitted",
-      history: societyMembership.history,
-    };
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${email}`, updatedMembership);
+      await uploadMembershipApplicationFile(
+        created.applicationId,
+        dataUrlToFile({ name: applicationFileName, dataUrl: applicationFileUrl }),
+      );
+      await syncBusinessStateFromApi(currentUser.email);
 
-    addNotification({
-      title: "退会申请已提交",
-      content: "您的退会申请书已提交，管理员审核通过后会员资格将即时终止。已缴费的待参会订单保留，可继续以非会员身份参会。",
-      type: "warning",
-    });
-
-    toast.success("退会申请已提交，请等待管理员审核。");
+      addNotification({
+        title: "退会申请已提交",
+        content: "您的退会申请书已提交，管理员审核通过后会员资格将即时终止。",
+        type: "warning",
+      });
+      toast.success("退会申请已提交，请等待管理员审核。");
+      return true;
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "提交失败");
+      return false;
+    }
   };
 
   /** 取消退会申请（仅在审核中时可用） */
-  const cancelWithdrawalApplicationAction = () => {
+  const cancelWithdrawalApplicationAction = async () => {
     if (!currentUser) { toast.error("请先登录系统。"); return; }
-    if (!withdrawalApplication || withdrawalApplication.status !== "withdrawal_submitted") {
+    if (!withdrawalApplication?.applicationId) {
       toast.error("当前没有待审核的退会申请。");
       return;
     }
 
-    setWithdrawalApplication(null);
-    const email = currentUser.email;
-    syncAdminApplication(email, "withdrawal", null);
+    try {
+      await cancelMembershipApplication(withdrawalApplication.applicationId);
+      setWithdrawalApplication(null);
+      const updatedMembership: SocietyMembership = {
+        ...societyMembership,
+        status: "active",
+        history: societyMembership.history,
+      };
+      setSocietyMembership(updatedMembership);
+      saveState(`paleo_society_membership_${currentUser.email}`, updatedMembership);
 
-    // 恢复为 active 状态
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "active",
-      history: societyMembership.history,
-    };
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${email}`, updatedMembership);
-
-    addNotification({
-      title: "退会申请已取消",
-      content: "您的退会申请书已取消，会员资格恢复正常。",
-      type: "info",
-    });
-
-    toast.info("退会申请已取消。");
+      addNotification({
+        title: "退会申请已取消",
+        content: "您的退会申请书已取消，会员资格恢复正常。",
+        type: "info",
+      });
+      toast.info("退会申请已取消。");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "取消失败");
+    }
   };
 
   /** 获取入会申请书模板下载 URL */
@@ -1716,180 +1622,39 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return "";
   };
 
-  // ── 入会/退会申请模拟审核（演示用） ──
-
-  /** 模拟管理员通过入会申请 → application_approved（等同 AuditWorkbench approveMembershipApplication） */
-  const simApproveMembershipApplication = () => {
-    if (!currentUser) return;
-    if (societyMembership.status !== "application_submitted" || !membershipApplication) {
-      toast.error("当前没有待审核的入会申请。");
-      return;
-    }
-
-    const email = currentUser.email;
-    const reviewTime = new Date().toISOString();
-    const updatedApp: MembershipApplication = {
-      ...membershipApplication,
-      status: "application_approved",
-      reviewTime,
-    };
-
-    setMembershipApplication(updatedApp);
-    syncAdminApplication(email, "membership", updatedApp);
-
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "application_approved",
-      history: societyMembership.history,
-    };
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${email}`, updatedMembership);
-
-    addNotification({
-      title: "入会申请已通过",
-      content: "您的入会申请书已审核通过，请前往会员服务缴纳会费完成入会。",
-      type: "success",
-    });
-    toast.success("入会申请已审核通过（演示），请缴纳会费。");
-  };
-
-  /** 模拟管理员驳回入会申请 */
-  const simRejectMembershipApplication = (reason: string) => {
-    if (!currentUser) return;
-    if (societyMembership.status !== "application_submitted" || !membershipApplication) {
-      toast.error("当前没有待审核的入会申请。");
-      return;
-    }
-
-    const email = currentUser.email;
-    const reviewTime = new Date().toISOString();
-    const updatedApp: MembershipApplication = {
-      ...membershipApplication,
-      status: "application_rejected",
-      rejectReason: reason,
-      reviewTime,
-    };
-
-    setMembershipApplication(updatedApp);
-    syncAdminApplication(email, "membership", updatedApp);
-
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "application_rejected",
-      applicationRejectReason: reason,
-      history: societyMembership.history,
-    };
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${email}`, updatedMembership);
-
-    addNotification({
-      title: "入会申请被驳回",
-      content: `您的入会申请书被驳回。原因：${reason}。请修改后重新提交。`,
-      type: "warning",
-    });
-    toast.error(`入会申请被驳回：${reason}`);
-  };
-
-  /** 模拟管理员通过退会申请 → withdrawn（等同 AuditWorkbench approveWithdrawalApplication） */
-  const simApproveWithdrawalApplication = () => {
-    if (!currentUser) return;
-    if (societyMembership.status !== "withdrawal_submitted" || !withdrawalApplication) {
-      toast.error("当前没有待审核的退会申请。");
-      return;
-    }
-
-    const email = currentUser.email;
-    const reviewTime = new Date().toISOString();
-    const updatedApp: WithdrawalApplication = {
-      ...withdrawalApplication,
-      status: "withdrawn",
-      reviewTime,
-    };
-
-    setWithdrawalApplication(updatedApp);
-    syncAdminApplication(email, "withdrawal", updatedApp);
-
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "withdrawn",
-      history: societyMembership.history,
-    };
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${email}`, updatedMembership);
-
-    setUserType("non_member");
-    localStorage.setItem(`paleo_user_type_${email}`, "non_member");
-    localStorage.setItem(`paleo_admin_user_type_${email}`, "non_member");
-
-    addNotification({
-      title: "退会申请已通过",
-      content: "您的退会申请已审核通过，会员资格已终止。已缴费的待参会订单保留。",
-      type: "info",
-    });
-    toast.success("退会申请已通过（演示），会员资格已终止。");
-  };
-
-  /** 模拟管理员驳回退会申请 → 恢复 active */
-  const simRejectWithdrawalApplication = (reason: string) => {
-    if (!currentUser) return;
-    if (societyMembership.status !== "withdrawal_submitted" || !withdrawalApplication) {
-      toast.error("当前没有待审核的退会申请。");
-      return;
-    }
-
-    const email = currentUser.email;
-    const reviewTime = new Date().toISOString();
-    const updatedApp: WithdrawalApplication = {
-      ...withdrawalApplication,
-      status: "withdrawal_rejected",
-      rejectReason: reason,
-      reviewTime,
-    };
-
-    setWithdrawalApplication(updatedApp);
-    syncAdminApplication(email, "withdrawal", updatedApp);
-
-    const updatedMembership: SocietyMembership = {
-      ...societyMembership,
-      status: "active",
-      history: societyMembership.history,
-    };
-    setSocietyMembership(updatedMembership);
-    saveState(`paleo_society_membership_${email}`, updatedMembership);
-
-    addNotification({
-      title: "退会申请被驳回",
-      content: `您的退会申请被驳回。原因：${reason}。会员资格保持不变。`,
-      type: "warning",
-    });
-    toast.error(`退会申请被驳回：${reason}`);
-  };
-
   const chooseMembershipPath = (path: "member" | "non_member") => {
     if (!currentUser) { toast.error("请先登录系统。"); return; }
 
-    setUserType(path);
-    setMembershipChoiceMade(true);
+    void (async () => {
+      try {
+        if (getUserToken()) {
+          await updateUserTypeApi(path, true);
+        }
+      } catch {
+        // 离线时仍允许本地路径选择
+      }
 
-    const email = currentUser.email;
-    localStorage.setItem(`paleo_user_type_${email}`, path);
-    localStorage.setItem(`paleo_choice_made_${email}`, "true");
-    localStorage.setItem(`paleo_admin_user_type_${email}`, path);
-    localStorage.setItem(`paleo_admin_choice_made_${email}`, "true");
+      setUserType(path);
+      setMembershipChoiceMade(true);
 
-    if (path === "member") {
-      addNotification({
-        title: "已选择：成为正式会员",
-        content: "请前往会员服务页面完成会费缴纳和身份验证，通过后即可享受会员价参会。",
-        type: "info"
-      });
-    } else {
-      addNotification({
-        title: "已选择：作为非会员使用",
-        content: "您可以直接绑定分会并注册会议，会议费将按非会员标准收取。您可随时在会员服务中升级为正式会员。",
-        type: "info"
-      });
-    }
+      const email = currentUser.email;
+      localStorage.setItem(`paleo_user_type_${email}`, path);
+      localStorage.setItem(`paleo_choice_made_${email}`, "true");
+
+      if (path === "member") {
+        addNotification({
+          title: "已选择：成为正式会员",
+          content: "请前往会员服务页面完成会费缴纳和身份验证，通过后即可享受会员价参会。",
+          type: "info",
+        });
+      } else {
+        addNotification({
+          title: "已选择：作为非会员使用",
+          content: "您可以直接绑定分会并注册会议，会议费将按非会员标准收取。您可随时在会员服务中升级为正式会员。",
+          type: "info",
+        });
+      }
+    })();
   };
 
   // ── 配置读取 ──
@@ -2066,18 +1831,6 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       uploadAbstractFile,
       setAccommodation,
       toggleFieldTripRoute,
-      simApproveSocietyMembership,
-      simRejectSocietyMembership,
-      simApproveConference,
-      simRejectConference,
-      simApproveSocietyVoucher,
-      simRejectSocietyVoucher,
-      simApproveSocietyInvoice,
-      simRejectSocietyInvoice,
-      simApproveConferenceVoucher,
-      simRejectConferenceVoucher,
-      simApproveConferenceInvoice,
-      simRejectConferenceInvoice,
       checkInvoiceOverdue,
       extendInvoiceDeadline,
       handleMembershipExpiry,
@@ -2099,10 +1852,6 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       cancelWithdrawalApplication: cancelWithdrawalApplicationAction,
       getMembershipApplicationTemplateUrl,
       getWithdrawalApplicationTemplateUrl,
-      simApproveMembershipApplication,
-      simRejectMembershipApplication,
-      simApproveWithdrawalApplication,
-      simRejectWithdrawalApplication,
       userType,
       membershipChoiceMade,
       chooseMembershipPath,

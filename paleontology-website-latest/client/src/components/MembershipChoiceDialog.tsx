@@ -4,9 +4,10 @@ import { toast } from "sonner";
 
 interface MembershipChoiceDialogProps {
   open: boolean;
+  onChooseMember?: () => void;
 }
 
-export default function MembershipChoiceDialog({ open }: MembershipChoiceDialogProps) {
+export default function MembershipChoiceDialog({ open, onChooseMember }: MembershipChoiceDialogProps) {
   const { chooseMembershipPath, getMembershipFee } = useMembership();
 
   if (!open) return null;
@@ -18,7 +19,8 @@ export default function MembershipChoiceDialog({ open }: MembershipChoiceDialogP
 
   const handleChooseMember = () => {
     chooseMembershipPath("member");
-    toast.success("已选择成为正式会员，请前往会员服务完成缴费验证。");
+    toast.success("已选择成为正式会员，请提交入会申请书。");
+    onChooseMember?.();
   };
 
   const SOCIETY_FEE = getMembershipFee("standard");

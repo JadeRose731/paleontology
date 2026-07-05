@@ -27,6 +27,18 @@ import {
 } from "./cms-data";
 import { CMS_SECTION_META, CMS_SECTIONS, PARTY_NAV_ITEMS } from "./cms-nav";
 import {
+  createCmsChannel, updateCmsChannel, deleteCmsChannel, listCmsChannelTree,
+} from "@/lib/cms-api";
+import {
+  extractServiceCategories,
+  findChannelNode,
+  SERVICE_CONTENT_MODULE_OPTIONS,
+  defaultWebsiteTabKey,
+  categoryAllowedForBranch,
+  type ServiceCategory,
+  type ServiceContentModule,
+} from "@/lib/services-categories";
+import {
   scopeLabel, statusBadgeClass, RichTextEditor, DeleteButton, ArticleSection,
   SortButtons, MemberOnlyBadge, ImageUploadField, AttachmentEditor,
 } from "./cms-ui";
@@ -81,6 +93,105 @@ export default function ContentManagement() {
   const [editPublicFile, setEditPublicFile] = useState<CmsPublicFile | null>(null);
   const [publicFileCategoryFilter, setPublicFileCategoryFilter] = useState<string>("all");
   const [showFormatHints, setShowFormatHints] = useState<string | null>(null);
+  const [servicesTab, setServicesTab] = useState<string>("");
+  const [serviceCategories, setServiceCategories] = useState<ServiceCategory[]>([]);
+  const [servicesParentId, setServicesParentId] = useState<number | undefined>();
+  const [editServiceCat, setEditServiceCat] = useState<ServiceCategory | null>(null);
+
+  const servicesSections = new Set(["services", "science", "international", "tech-rewards"]);
+  const isServicesView = servicesSections.has(section);
+  const canEditIntlAndTech = adminRole === "super_admin";
+
+  const visibleServiceCategories = useMemo(
+    () => serviceCategories.filter(c => canEditIntlAndTech || categoryAllowedForBranch(c)),
+    [serviceCategories, canEditIntlAndTech],
+  );
+
+  const loadServiceCategories = useCallback(async () => {
+    try {
+      const tree = await listCmsChannelTree();
+      const cats = extractServiceCategories(tree);
+      setServicesParentId(findChannelNode(tree, "services")?.channel.channelId);
+      setServiceCategories(cats);
+      const visible = cats.filter(c => canEditIntlAndTech || categoryAllowedForBranch(c));
+      setServicesTab(prev => (prev && visible.some(c => c.channelCode === prev) ? prev : visible[0]?.channelCode ?? ""));
+    } catch {
+      toast.error("子栏目加载失败");
+    }
+  }, [canEditIntlAndTech]);
+
+  useEffect(() => {
+    if (isServicesView) loadServiceCategories();
+  }, [isServicesView, loadServiceCategories]);
+
+  useEffect(() => {
+    if (!serviceCategories.length) return;
+    const legacyModule: Partial<Record<string, ServiceContentModule>> = {
+      science: "science",
+      international: "international",
+      "tech-rewards": "tech-rewards",
+    };
+    const mod = legacyModule[rawSection];
+    if (mod) {
+      const cat = serviceCategories.find(c => c.contentModule === mod);
+      if (cat) setServicesTab(cat.channelCode);
+    }
+  }, [rawSection, serviceCategories]);
+
+  const saveServiceCategory = async () => {
+    if (!editServiceCat || !servicesParentId) return;
+    if (!editServiceCat.navName.trim() || !editServiceCat.channelCode.trim()) {
+      toast.error("请填写栏目名称与编码");
+      return;
+    }
+    const payload = {
+      channelId: editServiceCat.channelId,
+      channelCode: editServiceCat.channelCode.trim(),
+      parentId: servicesParentId,
+      navName: editServiceCat.navName.trim(),
+      title: editServiceCat.navName.trim(),
+      subtitle: editServiceCat.subtitle ?? "",
+      contentModule: editServiceCat.contentModule,
+      layoutParams: JSON.stringify({
+        servicesTab: true,
+        websiteTabKey: editServiceCat.websiteTabKey || defaultWebsiteTabKey(editServiceCat.contentModule),
+      }),
+      visible: "1",
+      showInAdmin: "0",
+      adminSection: null,
+      pageType: "CMS",
+      shellType: "standard",
+      status: editServiceCat.status ?? "PUBLISHED",
+      sortOrder: editServiceCat.sortOrder ?? serviceCategories.length + 1,
+      adminRoles: '["super_admin"]',
+      locked: "0",
+    };
+    try {
+      if (editServiceCat.channelId) {
+        await updateCmsChannel(payload);
+        toast.success("子栏目已更新");
+      } else {
+        await createCmsChannel(payload);
+        toast.success("子栏目已创建");
+      }
+      setEditServiceCat(null);
+      await loadServiceCategories();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "保存失败");
+    }
+  };
+
+  const removeServiceCategory = async (cat: ServiceCategory) => {
+    if (!cat.channelId) return;
+    if (!window.confirm(`确定删除子栏目「${cat.navName}」？该栏目下的 CMS 内容条目不会自动删除。`)) return;
+    try {
+      await deleteCmsChannel(cat.channelId);
+      toast.success("已删除子栏目");
+      await loadServiceCategories();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "删除失败");
+    }
+  };
 
   const persist = useCallback((next: CmsDatabase) => {
     const prev = dbRef.current;
@@ -132,7 +243,7 @@ export default function ContentManagement() {
     });
   }, [db.media, mediaSearch, mediaCategory]);
 
-  const pageMeta = CMS_SECTION_META[section] ?? CMS_SECTION_META.banners;
+  const pageMeta = CMS_SECTION_META[isServicesView ? "services" : section] ?? CMS_SECTION_META.banners;
 
   const articleOps = (kind: "news" | "announcements") => ({
     onTogglePin: (id: string) => {
@@ -428,87 +539,177 @@ export default function ContentManagement() {
       )}
 
 
-      {section === "science" && (
-          <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <div><CardTitle className="text-base">内容列表</CardTitle><CardDescription>科普文章、视频、基地、专著与化石保护</CardDescription></div>
-              <Button size="sm" onClick={() => setEditScience({ id: generateCmsId("sci"), title: "", format: "article", category: SCIENCE_CATEGORIES[0], summary: "", content: "<p></p>", externalUrl: "", status: "draft", branchId: isBranchScope ? adminBranchId! : null, publishDate: new Date().toISOString().split("T")[0] })}><Plus className="h-3.5 w-3.5 mr-1" /> 新建</Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>格式</TableHead><TableHead>分类</TableHead><TableHead>归属</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {scoped.science.map(s => (
-                    <TableRow key={s.id}>
-                      <TableCell className="font-medium max-w-[200px] truncate">{s.title}</TableCell>
-                      <TableCell className="text-xs">{s.format}</TableCell>
-                      <TableCell>{s.category}</TableCell>
-                      <TableCell>{scopeLabel(s.branchId)}</TableCell>
-                      <TableCell><Badge variant="outline" className={statusBadgeClass(s.status)}>{CMS_STATUS_LABELS[s.status]}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditScience({ ...s })}><Edit className="h-3.5 w-3.5" /></Button>
-                        <DeleteButton title={s.title} onConfirm={() => { persist({ ...db, scienceItems: db.scienceItems.filter(x => x.id !== s.id) }); toast.success("已删除"); }} />
-                      </TableCell>
+      {isServicesView && (
+        <>
+          {canEditIntlAndTech && (
+            <Card className="mb-4">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">子栏目配置</CardTitle>
+                  <CardDescription>增删改 Tab 名称、内容类型与排序；保存后前台学会服务页同步更新</CardDescription>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => setEditServiceCat({
+                    channelCode: `svc_${Date.now()}`,
+                    navName: "",
+                    subtitle: "",
+                    contentModule: "science",
+                    websiteTabKey: "science",
+                    sortOrder: serviceCategories.length + 1,
+                    status: "PUBLISHED",
+                  })}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" /> 新增子栏目
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>显示名称</TableHead>
+                      <TableHead>栏目标识</TableHead>
+                      <TableHead>内容类型</TableHead>
+                      <TableHead>前台 Tab</TableHead>
+                      <TableHead>排序</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-      )}
+                  </TableHeader>
+                  <TableBody>
+                    {serviceCategories.map(cat => (
+                      <TableRow key={cat.channelCode}>
+                        <TableCell className="font-medium">{cat.navName}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{cat.channelCode}</TableCell>
+                        <TableCell>
+                          {SERVICE_CONTENT_MODULE_OPTIONS.find(o => o.value === cat.contentModule)?.label ?? cat.contentModule}
+                        </TableCell>
+                        <TableCell className="text-xs">{cat.websiteTabKey}</TableCell>
+                        <TableCell>{cat.sortOrder}</TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => setEditServiceCat({ ...cat })}><Edit className="h-3.5 w-3.5" /></Button>
+                          <DeleteButton title={cat.navName} onConfirm={() => removeServiceCategory(cat)} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {serviceCategories.length === 0 && (
+                      <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">暂无子栏目，请点击「新增子栏目」</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
 
-      {section === "international" && (
-          <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <div><CardTitle className="text-base">内容列表</CardTitle><CardDescription>交流动态、国际会议与合作机构</CardDescription></div>
-              <Button size="sm" onClick={() => setEditIntl({ id: generateCmsId("intl"), title: "", type: "news", summary: "", content: "<p></p>", linkUrl: "", logoUrl: "", status: "draft", publishDate: new Date().toISOString().split("T")[0] })}><Plus className="h-3.5 w-3.5 mr-1" /> 新建</Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>类型</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {db.internationalItems.map(i => (
-                    <TableRow key={i.id}>
-                      <TableCell className="font-medium">{i.title}</TableCell>
-                      <TableCell>{i.type === "news" ? "交流动态" : i.type === "conference" ? "国际会议" : "合作机构"}</TableCell>
-                      <TableCell><Badge variant="outline" className={statusBadgeClass(i.status)}>{CMS_STATUS_LABELS[i.status]}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditIntl({ ...i })}><Edit className="h-3.5 w-3.5" /></Button>
-                        <DeleteButton title={i.title} onConfirm={() => { persist({ ...db, internationalItems: db.internationalItems.filter(x => x.id !== i.id) }); toast.success("已删除"); }} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-      )}
+          {visibleServiceCategories.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-8 text-center">暂无可管理的子栏目内容</p>
+          ) : (
+            <Tabs value={servicesTab} onValueChange={setServicesTab}>
+              <TabsList className="mb-4 flex-wrap h-auto">
+                {visibleServiceCategories.map(cat => (
+                  <TabsTrigger key={cat.channelCode} value={cat.channelCode}>{cat.navName}</TabsTrigger>
+                ))}
+              </TabsList>
 
-      {section === "tech-rewards" && (
-          <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <div><CardTitle className="text-base">内容列表</CardTitle><CardDescription>奖项介绍与申报指南</CardDescription></div>
-              <Button size="sm" onClick={() => setEditTech({ id: generateCmsId("tech"), title: "", type: "guide", content: "<p></p>", status: "draft", updatedAt: new Date().toISOString().split("T")[0] })}><Plus className="h-3.5 w-3.5 mr-1" /> 新建</Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>类型</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {db.techRewardItems.map(t => (
-                    <TableRow key={t.id}>
-                      <TableCell className="font-medium">{t.title}</TableCell>
-                      <TableCell>{t.type === "intro" ? "奖项介绍" : "申报指南"}</TableCell>
-                      <TableCell><Badge variant="outline" className={statusBadgeClass(t.status)}>{CMS_STATUS_LABELS[t.status]}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditTech({ ...t })}><Edit className="h-3.5 w-3.5" /></Button>
-                        <DeleteButton title={t.title} onConfirm={() => { persist({ ...db, techRewardItems: db.techRewardItems.filter(x => x.id !== t.id) }); toast.success("已删除"); }} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+              {visibleServiceCategories.map(cat => (
+                <TabsContent key={cat.channelCode} value={cat.channelCode}>
+                  {cat.contentModule === "science" && (
+                    <Card>
+                      <CardHeader className="flex flex-row justify-between">
+                        <div>
+                          <CardTitle className="text-base">{cat.navName}</CardTitle>
+                          <CardDescription>{cat.subtitle ?? "科普文章、视频、基地、专著与化石保护"}</CardDescription>
+                        </div>
+                        <Button size="sm" onClick={() => setEditScience({ id: generateCmsId("sci"), title: "", format: "article", category: SCIENCE_CATEGORIES[0], summary: "", content: "<p></p>", externalUrl: "", status: "draft", branchId: isBranchScope ? adminBranchId! : null, publishDate: new Date().toISOString().split("T")[0] })}><Plus className="h-3.5 w-3.5 mr-1" /> 新建</Button>
+                      </CardHeader>
+                      <CardContent>
+                        <Table>
+                          <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>格式</TableHead><TableHead>分类</TableHead><TableHead>归属</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                          <TableBody>
+                            {scoped.science.map(s => (
+                              <TableRow key={s.id}>
+                                <TableCell className="font-medium max-w-[200px] truncate">{s.title}</TableCell>
+                                <TableCell className="text-xs">{s.format}</TableCell>
+                                <TableCell>{s.category}</TableCell>
+                                <TableCell>{scopeLabel(s.branchId)}</TableCell>
+                                <TableCell><Badge variant="outline" className={statusBadgeClass(s.status)}>{CMS_STATUS_LABELS[s.status]}</Badge></TableCell>
+                                <TableCell className="text-right">
+                                  <Button variant="ghost" size="sm" onClick={() => setEditScience({ ...s })}><Edit className="h-3.5 w-3.5" /></Button>
+                                  <DeleteButton title={s.title} onConfirm={() => { persist({ ...db, scienceItems: db.scienceItems.filter(x => x.id !== s.id) }); toast.success("已删除"); }} />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {cat.contentModule === "international" && (
+                    <Card>
+                      <CardHeader className="flex flex-row justify-between">
+                        <div>
+                          <CardTitle className="text-base">{cat.navName}</CardTitle>
+                          <CardDescription>{cat.subtitle ?? "交流动态、国际会议、重要报告与合作机构"}</CardDescription>
+                        </div>
+                        <Button size="sm" onClick={() => setEditIntl({ id: generateCmsId("intl"), title: "", type: "news", summary: "", content: "<p></p>", linkUrl: "", logoUrl: "", status: "draft", publishDate: new Date().toISOString().split("T")[0] })}><Plus className="h-3.5 w-3.5 mr-1" /> 新建</Button>
+                      </CardHeader>
+                      <CardContent>
+                        <Table>
+                          <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>类型</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                          <TableBody>
+                            {db.internationalItems.map(i => (
+                              <TableRow key={i.id}>
+                                <TableCell className="font-medium">{i.title}</TableCell>
+                                <TableCell>
+                                  {i.type === "news" ? "交流动态" : i.type === "conference" ? "国际会议" : i.type === "report" ? "重要报告" : "合作机构"}
+                                </TableCell>
+                                <TableCell><Badge variant="outline" className={statusBadgeClass(i.status)}>{CMS_STATUS_LABELS[i.status]}</Badge></TableCell>
+                                <TableCell className="text-right">
+                                  <Button variant="ghost" size="sm" onClick={() => setEditIntl({ ...i })}><Edit className="h-3.5 w-3.5" /></Button>
+                                  <DeleteButton title={i.title} onConfirm={() => { persist({ ...db, internationalItems: db.internationalItems.filter(x => x.id !== i.id) }); toast.success("已删除"); }} />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {cat.contentModule === "tech-rewards" && (
+                    <Card>
+                      <CardHeader className="flex flex-row justify-between">
+                        <div>
+                          <CardTitle className="text-base">{cat.navName}</CardTitle>
+                          <CardDescription>{cat.subtitle ?? "奖项介绍与申报指南"}</CardDescription>
+                        </div>
+                        <Button size="sm" onClick={() => setEditTech({ id: generateCmsId("tech"), title: "", type: "guide", content: "<p></p>", status: "draft", updatedAt: new Date().toISOString().split("T")[0] })}><Plus className="h-3.5 w-3.5 mr-1" /> 新建</Button>
+                      </CardHeader>
+                      <CardContent>
+                        <Table>
+                          <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>类型</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                          <TableBody>
+                            {db.techRewardItems.map(t => (
+                              <TableRow key={t.id}>
+                                <TableCell className="font-medium">{t.title}</TableCell>
+                                <TableCell>{t.type === "intro" ? "奖项介绍" : "申报指南"}</TableCell>
+                                <TableCell><Badge variant="outline" className={statusBadgeClass(t.status)}>{CMS_STATUS_LABELS[t.status]}</Badge></TableCell>
+                                <TableCell className="text-right">
+                                  <Button variant="ghost" size="sm" onClick={() => setEditTech({ ...t })}><Edit className="h-3.5 w-3.5" /></Button>
+                                  <DeleteButton title={t.title} onConfirm={() => { persist({ ...db, techRewardItems: db.techRewardItems.filter(x => x.id !== t.id) }); toast.success("已删除"); }} />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    </Card>
+                  )}
+                </TabsContent>
+              ))}
+            </Tabs>
+          )}
+        </>
       )}
 
         {/* Timeline */}
@@ -1296,7 +1497,7 @@ export default function ContentManagement() {
           <div className="space-y-3">
             <Input value={editIntl.title} onChange={e => setEditIntl({ ...editIntl, title: e.target.value })} />
             <Select value={editIntl.type} onValueChange={v => setEditIntl({ ...editIntl, type: v as CmsInternationalItem["type"] })}>
-              <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="news">交流动态</SelectItem><SelectItem value="conference">国际会议</SelectItem><SelectItem value="partner">合作机构</SelectItem></SelectContent>
+              <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="news">交流动态</SelectItem><SelectItem value="conference">国际会议</SelectItem><SelectItem value="report">重要报告</SelectItem><SelectItem value="partner">合作机构</SelectItem></SelectContent>
             </Select>
             <RichTextEditor value={editIntl.content} onChange={c => setEditIntl({ ...editIntl, content: c })} />
             <Input value={editIntl.linkUrl} onChange={e => setEditIntl({ ...editIntl, linkUrl: e.target.value })} placeholder="外链" />
@@ -1310,6 +1511,10 @@ export default function ContentManagement() {
       <Dialog open={!!editTech} onOpenChange={o => !o && setEditTech(null)}>
         <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto">{editTech && (<><DialogHeader><DialogTitle>科技奖励</DialogTitle></DialogHeader>
           <Input value={editTech.title} onChange={e => setEditTech({ ...editTech, title: e.target.value })} className="mb-3" />
+          <Select value={editTech.type} onValueChange={v => setEditTech({ ...editTech, type: v as CmsTechRewardItem["type"] })}>
+            <SelectTrigger className="mb-3"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="intro">奖项介绍</SelectItem><SelectItem value="guide">申报指南</SelectItem></SelectContent>
+          </Select>
           <RichTextEditor value={editTech.content} onChange={c => setEditTech({ ...editTech, content: c })} />
           <DialogFooter className="mt-4"><Button onClick={() => { const item = { ...editTech, status: "published" as const, updatedAt: new Date().toISOString().split("T")[0] }; persist({ ...db, techRewardItems: db.techRewardItems.some(t => t.id === item.id) ? db.techRewardItems.map(t => t.id === item.id ? item : t) : [...db.techRewardItems, item] }); setEditTech(null); toast.success("已发布"); }}>发布</Button></DialogFooter></>)}
         </DialogContent>
@@ -1360,6 +1565,76 @@ export default function ContentManagement() {
           </div>
           <DialogFooter className="mt-4"><Button onClick={() => { persist({ ...db, timelineNodes: db.timelineNodes.some(t => t.id === editTimeline.id) ? db.timelineNodes.map(t => t.id === editTimeline.id ? editTimeline : t) : [...db.timelineNodes, editTimeline] }); setEditTimeline(null); toast.success("已保存"); }}>保存</Button></DialogFooter></>)}
         </DialogContent>
+      </Dialog>
+
+      {/* Service category dialog */}
+      <Dialog open={!!editServiceCat} onOpenChange={o => !o && setEditServiceCat(null)}>
+        <DialogContent>{editServiceCat && (<>
+          <DialogHeader>
+            <DialogTitle>{editServiceCat.channelId ? "编辑子栏目" : "新增子栏目"}</DialogTitle>
+            <DialogDescription>配置学会服务页的 Tab 名称与内容类型</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>显示名称</Label>
+              <Input value={editServiceCat.navName} onChange={e => setEditServiceCat({ ...editServiceCat, navName: e.target.value })} placeholder="如：科学传播" />
+            </div>
+            <div className="space-y-2">
+              <Label>栏目标识（英文/数字，唯一）</Label>
+              <Input
+                value={editServiceCat.channelCode}
+                onChange={e => setEditServiceCat({ ...editServiceCat, channelCode: e.target.value })}
+                disabled={!!editServiceCat.channelId}
+                placeholder="svc_science"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>内容类型</Label>
+              <Select
+                value={editServiceCat.contentModule}
+                onValueChange={v => {
+                  const mod = v as ServiceContentModule;
+                  setEditServiceCat({
+                    ...editServiceCat,
+                    contentModule: mod,
+                    websiteTabKey: defaultWebsiteTabKey(mod),
+                  });
+                }}
+              >
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {SERVICE_CONTENT_MODULE_OPTIONS.map(o => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>前台 Tab 标识</Label>
+              <Input
+                value={editServiceCat.websiteTabKey}
+                onChange={e => setEditServiceCat({ ...editServiceCat, websiteTabKey: e.target.value })}
+                placeholder="science / international / awards"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>描述（可选）</Label>
+              <Textarea rows={2} value={editServiceCat.subtitle ?? ""} onChange={e => setEditServiceCat({ ...editServiceCat, subtitle: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>排序</Label>
+              <Input
+                type="number"
+                value={editServiceCat.sortOrder}
+                onChange={e => setEditServiceCat({ ...editServiceCat, sortOrder: Number(e.target.value) || 0 })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditServiceCat(null)}>取消</Button>
+            <Button onClick={saveServiceCategory}>保存</Button>
+          </DialogFooter>
+        </>)}</DialogContent>
       </Dialog>
 
       {/* Preview */}

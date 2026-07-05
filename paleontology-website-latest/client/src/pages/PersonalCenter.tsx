@@ -41,7 +41,7 @@ const CONF_MAP: Record<string, { title: string; branchName: string; time: string
 };
 
 export default function PersonalCenter() {
-  const { currentUser, isLoggedIn, societyMembership, boundBranches, conferenceRegs, userType, logout, deleteAccount, updateProfile, withdrawalApplication, submitWithdrawalApplication, cancelWithdrawalApplication, getWithdrawalApplicationTemplateUrl, simApproveMembershipApplication, simRejectMembershipApplication, simApproveWithdrawalApplication, simRejectWithdrawalApplication } = useMembership();
+  const { currentUser, isLoggedIn, societyMembership, boundBranches, conferenceRegs, userType, logout, deleteAccount, updateProfile, withdrawalApplication, submitWithdrawalApplication, cancelWithdrawalApplication, getWithdrawalApplicationTemplateUrl } = useMembership();
   const [, setLocation] = useLocation();
   const [activeTab, setActiveTab] = useState<"profile" | "branches" | "conferences" | "payments">("profile");
 
@@ -601,10 +601,10 @@ export default function PersonalCenter() {
                       <div className="flex gap-2">
                         <button onClick={() => { setWdFlowStep(1); setWdAppFile(null); }} className="flex-1 border border-slate-300 text-slate-600 rounded-lg font-bold text-xs py-2">上一步</button>
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             if (!wdAppFile) { toast.error("请先上传退会申请书"); return; }
-                            submitWithdrawalApplication(wdAppFile.dataUrl, wdAppFile.name);
-                            setWdFlowStep(3);
+                            const ok = await submitWithdrawalApplication(wdAppFile.dataUrl, wdAppFile.name);
+                            if (ok) setWdFlowStep(0);
                           }}
                           disabled={!wdAppFile}
                           className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white rounded-lg font-bold text-xs py-2"
@@ -645,23 +645,6 @@ export default function PersonalCenter() {
                       {withdrawalApplication?.applicationFileName && (
                         <p className="text-yellow-600 text-[10px]">已上传：{withdrawalApplication.applicationFileName}</p>
                       )}
-                      <div className="border-t border-yellow-200 pt-3">
-                        <p className="text-yellow-400 text-[10px] mb-2">[ 演示模式 ] 模拟管理员审核</p>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => simApproveWithdrawalApplication()}
-                            className="flex-1 bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">check_circle</span> 模拟通过
-                          </button>
-                          <button
-                            onClick={() => simRejectWithdrawalApplication("退会理由不充分")}
-                            className="flex-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded font-bold text-xs flex items-center justify-center gap-1"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">cancel</span> 模拟驳回
-                          </button>
-                        </div>
-                      </div>
                       <button
                         onClick={() => { cancelWithdrawalApplication(); }}
                         className="w-full border border-green-600 text-green-600 hover:bg-green-50 rounded-lg font-bold text-xs py-2"
@@ -940,27 +923,13 @@ export default function PersonalCenter() {
             {societyMembership?.status === "application_submitted" && (
               <Card className="border border-yellow-200 bg-yellow-50/30 shadow-sm p-4">
                 <p className="text-xs font-bold text-yellow-800 mb-2">⏳ 入会申请审核中</p>
-                <p className="text-xs text-yellow-700 mb-3">管理员审核通过后可缴纳会费。本地演示可直接模拟审核结果：</p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => simApproveMembershipApplication()}
-                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded font-bold text-xs flex items-center gap-1"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">check_circle</span> 模拟审核通过
-                  </button>
-                  <button
-                    onClick={() => simRejectMembershipApplication("申请书信息不完整")}
-                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-bold text-xs flex items-center gap-1"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">cancel</span> 模拟驳回
-                  </button>
-                  <button
-                    onClick={() => setLocation("/services?tab=member")}
-                    className="border border-[#002B49] text-[#002B49] px-4 py-2 rounded font-bold text-xs hover:bg-white"
-                  >
-                    前往会员服务 →
-                  </button>
-                </div>
+                <p className="text-xs text-yellow-700 mb-3">管理员审核通过后可缴纳会费，请耐心等待。</p>
+                <button
+                  onClick={() => setLocation("/services?tab=member")}
+                  className="border border-[#002B49] text-[#002B49] px-4 py-2 rounded font-bold text-xs hover:bg-white"
+                >
+                  前往会员服务 →
+                </button>
               </Card>
             )}
             {paymentSections.length === 0 ? (

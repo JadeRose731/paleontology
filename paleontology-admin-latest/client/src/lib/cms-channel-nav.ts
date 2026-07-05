@@ -15,6 +15,7 @@ const SECTION_DISPLAY_LABELS: Record<string, string> = {
   timeline: "学会沿革",
   gallery: "历史相册",
   international: "国际交流",
+  services: "学会服务",
   downloads: "资料下载",
   regulations: "规章条例",
   science: "科学传播",
