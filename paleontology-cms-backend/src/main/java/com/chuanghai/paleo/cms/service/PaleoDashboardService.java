@@ -65,7 +65,8 @@ public class PaleoDashboardService {
                 .filter(row -> "non_member".equals(String.valueOf(row.get("userType"))))
                 .count();
         long activeMembers = directory.stream()
-                .filter(row -> "active".equals(String.valueOf(row.get("membershipStatus"))))
+                .filter(row -> "member".equals(String.valueOf(row.get("userType")))
+                        && "active".equals(String.valueOf(row.get("membershipStatus"))))
                 .count();
 
         long studentMembers = 0;

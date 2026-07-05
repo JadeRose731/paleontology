@@ -352,26 +352,6 @@ const MOCK_USER_DB = [
     role: "教师" as const,
     title: "高级工程师",
     memberType: "普通会员" as MemberType
-  },
-  {
-    email: "member@paleontology.org.cn",
-    password: "password123",
-    name: "张华",
-    gender: "男" as const,
-    unit: "中国科学院古脊椎动物与古人类研究所",
-    role: "教师" as const,
-    title: "研究员",
-    memberType: "普通会员" as MemberType
-  },
-  {
-    email: "student@paleontology.org.cn",
-    password: "password123",
-    name: "李萌",
-    gender: "女" as const,
-    unit: "南京大学地科院",
-    role: "学生" as const,
-    title: "硕士研究生",
-    memberType: "普通会员" as MemberType
   }
 ];
 
@@ -585,6 +565,26 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         expiryDate: undefined,
         history: [record],
       };
+    } else if ((paymentActive && paymentStatus === "confirmed") || resolvedProfile?.memberStatus === "ACTIVE") {
+      const record: PaymentRecord | null = latestPayment && paymentStatus === "confirmed"
+        ? {
+            id: `rec-s-${latestPayment.paymentId}`,
+            type: "society_fee",
+            targetName: "中国古生物学会会员费",
+            amount: Number(latestPayment.amount || 0),
+            voucherUrl: latestPayment.voucherUrl || "",
+            invoiceUrl: latestPayment.invoiceUrl || "",
+            submitTime: latestPayment.createTime || new Date().toLocaleString("zh-CN"),
+            status: "approved",
+          }
+        : null;
+      membership = {
+        ...membership,
+        status: "active",
+        currentPaymentId: latestPayment?.paymentId,
+        expiryDate: resolvedProfile?.validEndDate || undefined,
+        history: record ? [record] : membership.history,
+      };
     } else if (latestJoin?.reviewStatus === "APPROVED") {
       membership = {
         ...membership,
@@ -599,24 +599,6 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         submitTime: latestJoin.createTime || "",
         reviewTime: latestJoin.reviewTime,
         rejectReason: latestJoin.reviewComment,
-      };
-    } else if (paymentActive && paymentStatus === "confirmed") {
-      const record: PaymentRecord = {
-        id: `rec-s-${latestPayment.paymentId}`,
-        type: "society_fee",
-        targetName: "中国古生物学会会员费",
-        amount: Number(latestPayment.amount || 0),
-        voucherUrl: latestPayment.voucherUrl || "",
-        invoiceUrl: latestPayment.invoiceUrl || "",
-        submitTime: latestPayment.createTime || new Date().toLocaleString("zh-CN"),
-        status: "approved",
-      };
-      membership = {
-        ...membership,
-        status: "active",
-        currentPaymentId: latestPayment.paymentId,
-        expiryDate: resolvedProfile?.validEndDate || undefined,
-        history: [record],
       };
     } else if (latestJoin && latestJoin.reviewStatus === "REJECTED") {
       const appStatus = mapApiApplicationReviewStatus(latestJoin.reviewStatus, "JOIN");
@@ -634,12 +616,6 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         submitTime: latestJoin.createTime || "",
         reviewTime: latestJoin.reviewTime,
         rejectReason: latestJoin.reviewComment,
-      };
-    } else if (resolvedProfile?.memberStatus === "ACTIVE") {
-      membership = {
-        ...membership,
-        status: "active",
-        expiryDate: resolvedProfile.validEndDate || undefined,
       };
     } else if (resolvedProfile?.memberStatus === "PENDING") {
       membership = { ...membership, status: "application_approved", history: membership.history };

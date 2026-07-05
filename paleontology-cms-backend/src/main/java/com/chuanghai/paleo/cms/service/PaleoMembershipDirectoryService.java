@@ -1,16 +1,19 @@
 package com.chuanghai.paleo.cms.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.chuanghai.paleo.cms.domain.PaleoAssociation;
 import com.chuanghai.paleo.cms.domain.PaleoMemberProfile;
 import com.chuanghai.paleo.cms.domain.PaleoMembershipApplication;
 import com.chuanghai.paleo.cms.domain.PaleoMembershipPayment;
 import com.chuanghai.paleo.cms.domain.PaleoUser;
 import com.chuanghai.paleo.cms.domain.PaleoUserBinding;
+import com.chuanghai.paleo.cms.mapper.PaleoAssociationMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,8 +22,28 @@ import java.util.stream.Collectors;
 @Service
 public class PaleoMembershipDirectoryService {
 
+    /** paleo_association.association_id → 前端分会编码（与 V11 种子顺序对齐） */
+    private static final Map<Long, String> ASSOCIATION_BRANCH_CODES;
+
+    static {
+        Map<Long, String> map = new HashMap<>();
+        map.put(1L, "zgswxh");
+        map.put(2L, "gwjzdwxfh");
+        map.put(3L, "gzwxfh");
+        map.put(4L, "kpgzwyh");
+        map.put(6L, "wtxfh");
+        map.put(7L, "hszlzwyh");
+        map.put(8L, "gjzdw");
+        map.put(10L, "gst");
+        map.put(11L, "bfxfh");
+        ASSOCIATION_BRANCH_CODES = Collections.unmodifiableMap(map);
+    }
+
     @Autowired
     private PaleoUserService userService;
+
+    @Autowired
+    private PaleoAssociationMapper associationMapper;
 
     @Autowired
     private PaleoMemberProfileService memberProfileService;
@@ -65,12 +88,22 @@ public class PaleoMembershipDirectoryService {
             pendingJoinMap.putIfAbsent(app.getUserId(), app);
         }
 
-        Map<Long, List<String>> branchMap = new HashMap<>();
+        Map<Long, String> associationNames = associationMapper.selectList(new LambdaQueryWrapper<PaleoAssociation>()
+                        .orderByAsc(PaleoAssociation::getSortOrder))
+                .stream()
+                .collect(Collectors.toMap(PaleoAssociation::getAssociationId,
+                        PaleoAssociation::getAssociationName, (a, b) -> a));
+
+        Map<Long, List<String>> branchCodeMap = new HashMap<>();
+        Map<Long, List<String>> branchNameMap = new HashMap<>();
         for (PaleoUserBinding binding : userBindingMapper.selectList(new LambdaQueryWrapper<PaleoUserBinding>()
                 .in(PaleoUserBinding::getUserId, userIds)
                 .eq(PaleoUserBinding::getBindingStatus, "BOUND"))) {
-            branchMap.computeIfAbsent(binding.getUserId(), k -> new ArrayList<>())
-                    .add(String.valueOf(binding.getAssociationId()));
+            Long assocId = binding.getAssociationId();
+            String code = ASSOCIATION_BRANCH_CODES.getOrDefault(assocId, String.valueOf(assocId));
+            String name = associationNames.getOrDefault(assocId, code);
+            branchCodeMap.computeIfAbsent(binding.getUserId(), k -> new ArrayList<>()).add(code);
+            branchNameMap.computeIfAbsent(binding.getUserId(), k -> new ArrayList<>()).add(name);
         }
 
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
@@ -94,7 +127,8 @@ public class PaleoMembershipDirectoryService {
             if (profile != null && profile.getValidEndDate() != null) {
                 row.put("validEndDate", dateFormat.format(profile.getValidEndDate()));
             }
-            row.put("boundBranches", branchMap.getOrDefault(user.getUserId(), new ArrayList<>()));
+            row.put("boundBranches", branchCodeMap.getOrDefault(user.getUserId(), new ArrayList<>()));
+            row.put("boundBranchNames", branchNameMap.getOrDefault(user.getUserId(), new ArrayList<>()));
             rows.add(row);
         }
         return rows;

@@ -81,7 +81,6 @@ export default function Services() {
     submitMembershipVoucher,
     submitMembershipInvoice,
     toggleBranchBinding,
-    payConference,
     submitConferenceVoucher,
     submitConferenceInvoice,
     submitConferenceForm,
@@ -920,7 +919,7 @@ export default function Services() {
                   {isAppRejected && (
                     <span className="inline-block bg-red-100 text-red-700 text-[9px] font-bold px-2 py-0.5 rounded-full mt-2">✗ 入会申请被驳回</span>
                   )}
-                  {isAppApproved && (
+                  {isAppApproved && !isMemberActive && (
                     <span className="inline-block bg-green-100 text-green-700 text-[9px] font-bold px-2 py-0.5 rounded-full mt-2">✓ 入会申请已通过</span>
                   )}
                   {isWithdrawalSubmitted && (
@@ -1106,7 +1105,7 @@ export default function Services() {
               )}
 
               {/* Phase 6: 入会申请已通过 → 进入缴费 */}
-              {isAppApproved && (
+              {isAppApproved && !isMemberActive && (
                 <div className="space-y-3 text-xs">
                   <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                     <p className="font-bold text-green-700 mb-1">✓ 入会申请已通过</p>
@@ -1877,6 +1876,8 @@ export default function Services() {
     // 2. CONFERENCE REGISTRATION PAYMENT (code7/11 style)
     if (confPaymentTarget) {
       const conf = conferences.find(c => c.id === confPaymentTarget);
+      const reg = conferenceRegs[confPaymentTarget];
+      const isInvoiceStep = confPaymentStep === 3;
 
       const handleConfVoucherUpload = () => {
         pickAndReadFile(".jpg,.jpeg,.png,.pdf", 5, (file) => {
@@ -1892,35 +1893,52 @@ export default function Services() {
         });
       };
 
-      const handleConfPaymentSubmit = async () => {
-        if (!confVoucher) {
-          toast.error("请先上传会议费银行转账汇款回单！");
-          return;
-        }
-        const feeAmount = getConferenceFee(confPaymentTarget);
-        const ok = await payConference(confPaymentTarget, confVoucher.dataUrl, confInvoice?.dataUrl || "", feeAmount);
-        if (!ok) return;
-
+      const resetConfPayment = () => {
         setConfPaymentTarget(null);
         setConfVoucher(null);
         setConfInvoice(null);
         setConfPaymentStep(1);
       };
 
+      const handleConfPaymentSubmit = async () => {
+        if (isInvoiceStep) {
+          if (!confInvoice) {
+            toast.error("请先上传电子发票！");
+            return;
+          }
+          const ok = await submitConferenceInvoice(confPaymentTarget, confInvoice.dataUrl);
+          if (!ok) return;
+          resetConfPayment();
+          return;
+        }
+
+        if (!confVoucher) {
+          toast.error("请先上传会议费银行转账汇款回单！");
+          return;
+        }
+        const feeAmount = getConferenceFee(confPaymentTarget);
+        const ok = await submitConferenceVoucher(confPaymentTarget, confVoucher.dataUrl, feeAmount);
+        if (!ok) return;
+        resetConfPayment();
+      };
+
       return (
         <div className="max-w-4xl mx-auto py-12 px-6">
           <div className="mb-8 text-xs text-slate-500 flex items-center gap-2">
-            <button onClick={() => setConfPaymentTarget(null)} className="hover:text-[#002B49] transition-colors">会议服务中心</button>
+            <button onClick={resetConfPayment} className="hover:text-[#002B49] transition-colors">会议服务中心</button>
             <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-            <span className="text-[#002B49] font-bold">缴纳会议注册费</span>
+            <span className="text-[#002B49] font-bold">{isInvoiceStep ? "上传电子发票" : "缴纳会议注册费"}</span>
           </div>
 
           <div className="bg-white border border-[#E5E1DA] rounded-xl p-8 shadow-sm">
             <div className="text-center mb-8 border-b border-slate-100 pb-4">
-              <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">第一步：线下汇款转账 ➔ 第二步：在此提交回单凭证</span>
-              <h2 className="text-lg font-bold text-[#002B49] mt-2">缴纳会议注册费：{conf?.title}</h2>
+              <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                {isInvoiceStep ? "阶段二：凭证初审通过后上传电子发票" : "阶段一：线下汇款转账 ➔ 在此提交回单凭证"}
+              </span>
+              <h2 className="text-lg font-bold text-[#002B49] mt-2">{isInvoiceStep ? "上传电子发票" : "缴纳会议注册费"}：{conf?.title}</h2>
             </div>
 
+            {!isInvoiceStep ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 text-xs">
               <div className="bg-slate-50 p-5 rounded-lg border border-[#E5E1DA]">
                 <h3 className="font-bold text-[#002B49] mb-4 flex items-center gap-1"><span className="material-symbols-outlined text-sm">receipt</span> 收费明细（四类注册费）</h3>
@@ -1980,10 +1998,17 @@ export default function Services() {
                 </div>
               </div>
             </div>
+            ) : (
+              <div className="mb-8 bg-blue-50 border border-blue-200 rounded-lg p-4 text-xs text-blue-800">
+                <p className="font-bold mb-1">凭证初审已通过，请上传电子发票完成阶段二。</p>
+                <p>请于 <strong>{reg?.invoiceDeadline || "--"}</strong> 前上传电子发票（JPG/PNG/PDF ≤10MB）。</p>
+              </div>
+            )}
 
             <div className="max-w-lg mx-auto space-y-4">
+              {!isInvoiceStep ? (
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1.5">1. 会议费线下转账/汇款成功电子回单 *</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1.5">会议费线下转账/汇款成功电子回单 *</label>
                 <div 
                   onClick={handleConfVoucherUpload}
                   className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all ${
@@ -2002,10 +2027,11 @@ export default function Services() {
                     </div>
                   )}
                 </div>
+                <p className="text-[11px] text-slate-400 mt-2 text-center">凭证初审通过后，系统会通知您再上传电子发票。</p>
               </div>
-
+              ) : (
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1.5">2. 增值税电子普通发票开票抬头与税号 (选填)</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1.5">电子发票 *</label>
                 <div 
                   onClick={handleConfInvoiceUpload}
                   className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-all ${
@@ -2015,26 +2041,28 @@ export default function Services() {
                   {confInvoice ? (
                     <div className="text-[#715a3e] font-bold text-xs flex items-center justify-center gap-1">
                       <span className="material-symbols-outlined">receipt</span>
-                      已上传发票税号资料：{confInvoice.name}
+                      已上传：{confInvoice.name}
                     </div>
                   ) : (
                     <div className="text-slate-500 text-xs">
                       <span className="material-symbols-outlined text-3xl text-slate-400 mb-1">receipt_long</span>
-                      <p className="font-bold">点击上传开票税号信息或单位证明</p>
+                      <p className="font-bold text-[#002B49]">点击上传电子发票</p>
                     </div>
                   )}
                 </div>
               </div>
+              )}
 
               <div className="flex justify-center space-x-4 pt-6 border-t border-slate-100">
-                <button onClick={() => setConfPaymentTarget(null)} className="px-6 py-2 border border-slate-300 text-slate-600 rounded-lg font-bold text-xs">
+                <button onClick={resetConfPayment} className="px-6 py-2 border border-slate-300 text-slate-600 rounded-lg font-bold text-xs">
                   取消返回
                 </button>
                 <button 
                   onClick={handleConfPaymentSubmit}
-                  className="px-8 py-2 bg-[#002B49] text-white rounded-lg font-bold text-xs shadow-md"
+                  disabled={isInvoiceStep ? !confInvoice : !confVoucher}
+                  className="px-8 py-2 bg-[#002B49] text-white rounded-lg font-bold text-xs shadow-md disabled:opacity-40"
                 >
-                  提交会议费审核
+                  {isInvoiceStep ? "提交发票，等待终审" : "提交凭证，等待审核"}
                 </button>
               </div>
             </div>
@@ -2263,6 +2291,9 @@ export default function Services() {
                         return;
                       }
                       setConfPaymentTarget(conf!.id);
+                      setConfPaymentStep(1);
+                      setConfVoucher(null);
+                      setConfInvoice(null);
                     }}
                     disabled={isPaymentDeadlineExceeded}
                     className={`px-6 py-2 rounded-lg font-bold text-xs shadow-md ${
@@ -2288,7 +2319,7 @@ export default function Services() {
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 space-y-2 w-full">
                     <p className="font-bold">✗ 凭证初审被驳回</p>
                     {reg.voucherRejectReason && <p className="text-red-600">原因：{reg.voucherRejectReason}</p>}
-                    <button onClick={() => setConfPaymentTarget(conf!.id)} className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded font-bold text-xs">
+                    <button onClick={() => { setConfPaymentTarget(conf!.id); setConfPaymentStep(1); setConfVoucher(null); setConfInvoice(null); }} className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded font-bold text-xs">
                       重新上传凭证
                     </button>
                   </div>
@@ -2463,6 +2494,9 @@ export default function Services() {
                               return;
                             }
                             setConfPaymentTarget(c.id);
+                            setConfPaymentStep(1);
+                            setConfVoucher(null);
+                            setConfInvoice(null);
                           }}
                           className="bg-[#002B49] hover:bg-[#001f35] text-white px-4 py-1.5 rounded font-bold text-[10px] shadow-sm"
                         >
@@ -2780,7 +2814,7 @@ export default function Services() {
                           <span className="text-blue-600 font-bold text-[10px] text-center">发票截止：{reg.invoiceDeadline}</span>
                         )}
                         <button
-                          onClick={() => { setConfPaymentTarget(c.id); setConfPaymentStep(3); }}
+                          onClick={() => { setConfPaymentTarget(c.id); setConfPaymentStep(3); setConfVoucher(null); setConfInvoice(null); }}
                           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold text-xs transition-colors text-center"
                         >
                           上传发票
@@ -2851,12 +2885,14 @@ export default function Services() {
         {/* Inline conference payment dialog */}
         {confPaymentTarget && (() => {
           const c = conferences.find(x => x.id === confPaymentTarget)!;
+          const reg = conferenceRegs[confPaymentTarget];
+          const isInvoiceStep = confPaymentStep === 3;
           return (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
                 <div className="p-6 border-b border-[#E5E1DA] flex items-center justify-between">
-                  <h3 className="font-bold text-[#002B49] text-base">缴纳会议注册费</h3>
-                  <button onClick={() => setConfPaymentTarget(null)} className="text-slate-400 hover:text-slate-600">
+                  <h3 className="font-bold text-[#002B49] text-base">{isInvoiceStep ? "上传电子发票" : "缴纳会议注册费"}</h3>
+                  <button onClick={() => { setConfPaymentTarget(null); setConfPaymentStep(1); setConfVoucher(null); setConfInvoice(null); }} className="text-slate-400 hover:text-slate-600">
                     <span className="material-symbols-outlined">close</span>
                   </button>
                 </div>
@@ -2864,69 +2900,96 @@ export default function Services() {
                   <div className="bg-[#FCFAF7] rounded-lg p-4 text-xs space-y-2">
                     <p className="font-bold text-[#002B49]">{c.title}</p>
                     <p className="text-slate-500">{c.time} · {c.location}</p>
-                    <p className="text-lg font-bold text-[#c8a96e]">¥{(() => {
-                      const fc = getConferenceFeeConfig(c.id);
-                      if (isLoggedIn) {
-                        const uft = getUserFeeType();
-                        const fieldMap: Record<ConferenceFeeType, number> = {
-                          student_member: fc.studentMember,
-                          non_student_member: fc.nonStudentMember,
-                          student_non_member: fc.studentNonMember,
-                          non_student_non_member: fc.nonStudentNonMember,
-                        };
-                        return fieldMap[uft] || fc.nonStudentMember;
-                      }
-                      return fc.nonStudentMember;
-                    })()}</p>
+                    {!isInvoiceStep && (
+                      <p className="text-lg font-bold text-[#c8a96e]">¥{(() => {
+                        const fc = getConferenceFeeConfig(c.id);
+                        if (isLoggedIn) {
+                          const uft = getUserFeeType();
+                          const fieldMap: Record<ConferenceFeeType, number> = {
+                            student_member: fc.studentMember,
+                            non_student_member: fc.nonStudentMember,
+                            student_non_member: fc.studentNonMember,
+                            non_student_non_member: fc.nonStudentNonMember,
+                          };
+                          return fieldMap[uft] || fc.nonStudentMember;
+                        }
+                        return fc.nonStudentMember;
+                      })()}</p>
+                    )}
                   </div>
-                  <div className="bg-blue-50 rounded-lg p-4 text-xs">
-                    <p className="font-bold text-blue-800 mb-1">收款账户信息</p>
-                    <p className="text-blue-700">开户名称：中国古生物学会</p>
-                    <p className="text-blue-700">开户行：中国工商银行南京分行</p>
-                    <p className="text-blue-700">账号：3210 0000 0000 0000</p>
-                    <p className="text-blue-700">汇款备注：{c.title}注册费</p>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">上传缴费凭证 *</label>
-                    <div
-                      className="border-2 border-dashed border-[#E5E1DA] rounded-lg p-4 text-center cursor-pointer hover:border-[#c8a96e] transition-colors"
-                      onClick={() => pickAndReadFile(".jpg,.jpeg,.png,.pdf", 5, (file) => { setConfVoucher(file); toast.success("凭证上传成功"); })}
-                    >
-                      {confVoucher ? (
-                        <p className="text-green-600 font-bold text-xs">✓ {confVoucher.name}</p>
-                      ) : (
-                        <p className="text-slate-400 text-xs">点击上传凭证图片（JPG/PNG/PDF ≤5MB）</p>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">上传电子发票（可选）</label>
-                    <div
-                      className="border-2 border-dashed border-[#E5E1DA] rounded-lg p-4 text-center cursor-pointer hover:border-[#c8a96e] transition-colors"
-                      onClick={() => pickAndReadFile(".jpg,.jpeg,.png,.pdf", 10, (file) => { setConfInvoice(file); toast.success("发票上传成功"); })}
-                    >
-                      {confInvoice ? (
-                        <p className="text-green-600 font-bold text-xs">✓ {confInvoice.name}</p>
-                      ) : (
-                        <p className="text-slate-400 text-xs">点击上传发票（JPG/PNG/PDF ≤10MB）</p>
-                      )}
-                    </div>
-                  </div>
+                  {!isInvoiceStep ? (
+                    <>
+                      <div className="bg-blue-50 rounded-lg p-4 text-xs">
+                        <p className="font-bold text-blue-800 mb-1">收款账户信息</p>
+                        <p className="text-blue-700">开户名称：中国古生物学会</p>
+                        <p className="text-blue-700">开户行：中国工商银行南京分行</p>
+                        <p className="text-blue-700">账号：3210 0000 0000 0000</p>
+                        <p className="text-blue-700">汇款备注：{c.title}注册费</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">上传缴费凭证 *</label>
+                        <div
+                          className="border-2 border-dashed border-[#E5E1DA] rounded-lg p-4 text-center cursor-pointer hover:border-[#c8a96e] transition-colors"
+                          onClick={() => pickAndReadFile(".jpg,.jpeg,.png,.pdf", 5, (file) => { setConfVoucher(file); toast.success("凭证上传成功"); })}
+                        >
+                          {confVoucher ? (
+                            <p className="text-green-600 font-bold text-xs">✓ {confVoucher.name}</p>
+                          ) : (
+                            <p className="text-slate-400 text-xs">点击上传凭证图片（JPG/PNG/PDF ≤5MB）</p>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-2 text-center">凭证初审通过后，再上传电子发票。</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="bg-blue-50 rounded-lg p-4 text-xs text-blue-800">
+                        <p className="font-bold mb-1">凭证初审已通过，请上传电子发票。</p>
+                        <p>请于 <strong>{reg?.invoiceDeadline || "--"}</strong> 前上传（JPG/PNG/PDF ≤10MB）。</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">上传电子发票 *</label>
+                        <div
+                          className="border-2 border-dashed border-[#E5E1DA] rounded-lg p-4 text-center cursor-pointer hover:border-[#c8a96e] transition-colors"
+                          onClick={() => pickAndReadFile(".jpg,.jpeg,.png,.pdf", 10, (file) => { setConfInvoice(file); toast.success("发票上传成功"); })}
+                        >
+                          {confInvoice ? (
+                            <p className="text-green-600 font-bold text-xs">✓ {confInvoice.name}</p>
+                          ) : (
+                            <p className="text-slate-400 text-xs">点击上传发票（JPG/PNG/PDF ≤10MB）</p>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
                   <button
-                    disabled={!confVoucher}
+                    disabled={isInvoiceStep ? !confInvoice : !confVoucher}
                     onClick={async () => {
+                      if (isInvoiceStep) {
+                        if (!confInvoice) return;
+                        const ok = await submitConferenceInvoice(confPaymentTarget, confInvoice.dataUrl);
+                        if (ok) {
+                          setConfPaymentTarget(null);
+                          setConfPaymentStep(1);
+                          setConfInvoice(null);
+                        }
+                        return;
+                      }
                       if (!confVoucher) return;
-                      const ok = await payConference(
+                      const ok = await submitConferenceVoucher(
                         confPaymentTarget,
                         confVoucher.dataUrl,
-                        confInvoice?.dataUrl || "",
                         getConferenceFee(confPaymentTarget),
                       );
-                      if (ok) setConfPaymentTarget(null);
+                      if (ok) {
+                        setConfPaymentTarget(null);
+                        setConfPaymentStep(1);
+                        setConfVoucher(null);
+                      }
                     }}
                     className="w-full bg-[#002B49] hover:bg-[#003d6b] disabled:opacity-40 text-white py-3 rounded-lg font-bold text-sm transition-colors"
                   >
-                    提交凭证，等待审核
+                    {isInvoiceStep ? "提交发票，等待终审" : "提交凭证，等待审核"}
                   </button>
                 </div>
               </div>

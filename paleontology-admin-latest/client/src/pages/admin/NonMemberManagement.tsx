@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Search, Eye, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
-import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, BRANCH_MAP, USER_TYPE_LABEL } from "@shared/constants";
+import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, BRANCH_MAP, getUserTypeLabel, formatBoundBranchLabel } from "@shared/constants";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -43,6 +43,20 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function BranchTags({ branches, branchNames }: { branches: string[]; branchNames?: string[] }) {
+  const labels = branchNames?.length ? branchNames : branches.map(formatBoundBranchLabel);
+  if (!labels.length) return <span className="text-muted-foreground text-xs">无</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {labels.map((label) => (
+        <Badge key={label} variant="outline" className="text-[10px] font-normal bg-slate-50 text-slate-700 border-slate-200">
+          {label}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 function NonMemberDetailSheet({
   open,
   onOpenChange,
@@ -73,13 +87,11 @@ function NonMemberDetailSheet({
                 <div><span className="text-muted-foreground">角色：</span>{detail.role || "-"}</div>
                 <div className="col-span-2">
                   <span className="text-muted-foreground">用户类型：</span>
-                  {USER_TYPE_LABEL[detail.userType] || detail.userType || "-"}
+                  {getUserTypeLabel(detail.userType)}
                 </div>
                 <div className="col-span-2">
-                  <span className="text-muted-foreground">绑定分会：</span>
-                  {detail.boundBranches.length > 0
-                    ? detail.boundBranches.map((b) => BRANCH_MAP[b] || b).join("、")
-                    : "无"}
+                  <span className="text-muted-foreground block mb-1">绑定分会：</span>
+                  <BranchTags branches={detail.boundBranches} branchNames={detail.boundBranchNames} />
                 </div>
                 <div className="col-span-2">
                   <span className="text-muted-foreground">是否禁用：</span>{detail.disabled ? "是" : "否"}
@@ -215,13 +227,11 @@ export default function NonMemberManagement() {
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="bg-gray-50 text-gray-500 border border-gray-200">
-                          {USER_TYPE_LABEL[m.userType] || m.userType || "-"}
+                          {getUserTypeLabel(m.userType)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate" title={m.boundBranches.map(b => BRANCH_MAP[b] || b).join("、")}>
-                        {m.boundBranches.length > 0
-                          ? m.boundBranches.map((b) => BRANCH_MAP[b] || b).join("、")
-                          : "-"}
+                      <TableCell className="max-w-[220px]">
+                        <BranchTags branches={m.boundBranches} branchNames={m.boundBranchNames} />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">

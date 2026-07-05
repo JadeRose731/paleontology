@@ -1,4 +1,4 @@
-import { Bell, LogOut, User } from "lucide-react";
+import { LogOut, User } from "lucide-react";
 import { useAdmin } from "@/contexts/AdminContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,7 +19,7 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function AdminTopBar() {
-  const { adminUser, adminRole, unreadCount, adminLogout } = useAdmin();
+  const { adminUser, adminRole, adminLogout } = useAdmin();
   const [, setLocation] = useLocation();
 
   const handleLogout = () => {
@@ -37,19 +37,6 @@ export default function AdminTopBar() {
       </div>
 
       <div className="flex items-center gap-4">
-        <button
-          onClick={() => setLocation("/admin/dashboard")}
-          className="relative"
-          title="通知"
-        >
-          <Bell className="h-5 w-5 text-white/70 hover:text-white transition-colors" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-party-red text-white text-[10px] rounded-full h-4 w-4 flex items-center justify-center font-bold">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
-          )}
-        </button>
-
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="text-white hover:bg-white/10 flex items-center gap-2 px-2 h-auto py-1">

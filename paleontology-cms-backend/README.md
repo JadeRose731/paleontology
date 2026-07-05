@@ -109,8 +109,6 @@ Content-Type: application/json
 | 邮箱 | 密码 |
 |------|------|
 | `demo@paleontology.org.cn` | `demo123` |
-| `member@paleontology.org.cn` | `password123` |
-| `student@paleontology.org.cn` | `password123` |
 
 后续请求：
 

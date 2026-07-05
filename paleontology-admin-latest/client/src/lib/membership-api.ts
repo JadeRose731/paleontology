@@ -78,6 +78,15 @@ export function mapApiPaymentStatus(status?: string): string {
   return status ? (map[status] || status.toLowerCase()) : "unpaid";
 }
 
+/** Hide empty UNPAID drafts that were never submitted with a voucher. */
+export function filterVisibleMembershipPayments(rows: ApiMembershipPaymentRow[]): ApiMembershipPaymentRow[] {
+  return rows.filter((p) => {
+    const status = (p.paymentStatus || "").toUpperCase();
+    if (status === "UNPAID" && !p.voucherUrl) return false;
+    return true;
+  });
+}
+
 export interface ApiMemberDirectoryRow {
   userId: number;
   email: string;
@@ -91,6 +100,7 @@ export interface ApiMemberDirectoryRow {
   membershipStatus?: string;
   validEndDate?: string;
   boundBranches?: string[];
+  boundBranchNames?: string[];
 }
 
 export interface ApiReviewApplication {
@@ -111,6 +121,27 @@ export interface ApiReviewApplication {
 
 export async function fetchMemberDirectory() {
   return request<ApiMemberDirectoryRow[]>("/paleo/membership/admin/directory");
+}
+
+export interface ApiMembershipPaymentRow {
+  paymentId: number;
+  userId?: number;
+  userEmail?: string;
+  userName?: string;
+  memberCategory?: string;
+  amount?: number;
+  paymentStatus?: string;
+  voucherUrl?: string;
+  invoiceUrl?: string;
+  reviewComment?: string;
+  createTime?: string;
+  updateTime?: string;
+  validStartDate?: string;
+  validEndDate?: string;
+}
+
+export async function fetchUserMembershipPayments(userId: number) {
+  return request<ApiMembershipPaymentRow[]>(`/paleo/membership/admin/users/${userId}/payments`);
 }
 
 export async function fetchPendingApplications(applicationType: "JOIN" | "WITHDRAW") {

@@ -56,6 +56,18 @@ public class PaleoMembershipController extends BaseController {
         return success(directoryService.listDirectory());
     }
 
+    @ApiOperation("管理端-指定用户的会员费记录")
+    @GetMapping("/admin/users/{userId}/payments")
+    public AjaxResult userMembershipPayments(@PathVariable Long userId) {
+        List<PaleoMembershipPayment> list = paymentService.list(new LambdaQueryWrapper<PaleoMembershipPayment>()
+                .eq(PaleoMembershipPayment::getUserId, userId)
+                .orderByDesc(PaleoMembershipPayment::getCreateTime))
+                .stream()
+                .filter(paymentService::isDisplayable)
+                .toList();
+        return success(enrichPayments(list));
+    }
+
     @ApiOperation("管理端-会员档案列表")
     @GetMapping("/profiles/list")
     public TableDataInfo profileList(PaleoMemberProfile query,
@@ -226,14 +238,8 @@ public class PaleoMembershipController extends BaseController {
     public AjaxResult addMyPayment(@RequestBody PaleoMembershipPayment payment) {
         Long userId = getUserId();
         if (userId == null) return error("未登录");
-        payment.setPaymentId(null);
         payment.setUserId(userId);
-        payment.setPaymentStatus("UNPAID");
-        payment.setCreateBy(getUsername());
-        if (!paymentService.save(payment)) {
-            return error("提交失败");
-        }
-        return success(payment);
+        return success(paymentService.getOrCreateDraft(payment, getUsername()));
     }
 
     @ApiOperation("管理端-审核会员费")

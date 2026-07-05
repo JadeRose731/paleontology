@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAdmin, type MemberRecord, type MemberDetail } from "@/contexts/AdminContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,8 +11,9 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Filter, Eye, UserPlus, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
-import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, BRANCH_MAP } from "@shared/constants";
+import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, CONFERENCE_STATUS_LABEL, CONFERENCE_STATUS_COLOR, BRANCH_MAP, getMemberCategoryLabel, getUserTypeLabel, formatBoundBranchLabel } from "@shared/constants";
 import { FilePreviewDialog } from "@/components/FilePreviewDialog";
+import { fetchUserMembershipPayments, filterVisibleMembershipPayments, mapApiPaymentStatus, type ApiMembershipPaymentRow } from "@/lib/membership-api";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -62,6 +63,45 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function PaymentStatusBadge({ status }: { status: string }) {
+  const label = status === "active" || status === "confirmed"
+    ? "会员资格有效"
+    : (CONFERENCE_STATUS_LABEL[status] || MEMBERSHIP_STATUS_LABEL[status] || status);
+  const colorMap: Record<string, string> = {
+    ...CONFERENCE_STATUS_COLOR,
+    active: CONFERENCE_STATUS_COLOR.confirmed,
+    confirmed: CONFERENCE_STATUS_COLOR.confirmed,
+  };
+  return (
+    <Badge variant="outline" className={`text-[11px] font-normal ${colorMap[status] || "bg-gray-50 text-gray-500 border border-gray-200"}`}>
+      {label}
+    </Badge>
+  );
+}
+
+function formatDateTime(value?: string): string {
+  if (!value || value === "-") return "-";
+  return value.replace("T", " ").slice(0, 19);
+}
+
+function BranchTags({ branches, branchNames }: { branches: string[]; branchNames?: string[] }) {
+  const labels = branchNames?.length
+    ? branchNames
+    : branches.map(formatBoundBranchLabel);
+  if (!labels.length) {
+    return <span className="text-muted-foreground text-xs">无</span>;
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {labels.map((label) => (
+        <Badge key={label} variant="outline" className="text-[10px] font-normal bg-slate-50 text-slate-700 border-slate-200">
+          {label}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 function MemberDetailSheet({
   open,
   onOpenChange,
@@ -74,115 +114,198 @@ function MemberDetailSheet({
   const { getMemberDetail } = useAdmin();
   const detail: MemberDetail | null = email ? getMemberDetail(email) : null;
   const [preview, setPreview] = useState<{ title: string; url: string; name?: string } | null>(null);
+  const [apiPayments, setApiPayments] = useState<ApiMembershipPaymentRow[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open || !detail?.userId) {
+      setApiPayments([]);
+      return;
+    }
+    let cancelled = false;
+    setPaymentsLoading(true);
+    fetchUserMembershipPayments(detail.userId)
+      .then((rows) => {
+        if (!cancelled) setApiPayments(filterVisibleMembershipPayments(rows ?? []));
+      })
+      .catch(() => {
+        if (!cancelled) setApiPayments([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPaymentsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [open, detail?.userId, email]);
+
+  const paymentRows = apiPayments.length > 0
+    ? apiPayments.map((p) => ({
+        id: String(p.paymentId),
+        type: "society_fee" as const,
+        targetName: "中国古生物学会会员费",
+        amount: Number(p.amount ?? 0),
+        memberCategory: p.memberCategory,
+        voucherUrl: p.voucherUrl || "",
+        invoiceUrl: p.invoiceUrl || "",
+        submitTime: p.createTime || "-",
+        auditTime: p.updateTime,
+        status: (() => {
+          const s = mapApiPaymentStatus(p.paymentStatus);
+          return s === "confirmed" ? "active" : s;
+        })(),
+        reviewComment: p.reviewComment,
+        validEndDate: p.validEndDate,
+      }))
+    : (detail?.paymentHistory ?? []);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-[480px] sm:max-w-[480px] overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>会员详情</SheetTitle>
-          <SheetDescription>会员邮箱：{email}</SheetDescription>
+      <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetHeader className="pb-2 border-b border-[#E5E1DA]">
+          <SheetTitle className="text-lg text-[#002B49]">会员详情</SheetTitle>
+          <SheetDescription className="text-sm">{email}</SheetDescription>
         </SheetHeader>
         {detail ? (
-          <div className="space-y-6 py-4">
-            <div className="space-y-2">
-              <h4 className="font-semibold text-sm text-strata-blue-deep">基本信息</h4>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-muted-foreground">姓名：</span>{detail.name || "-"}</div>
-                <div><span className="text-muted-foreground">性别：</span>{detail.gender || "-"}</div>
-                <div><span className="text-muted-foreground">单位：</span>{detail.unit || "-"}</div>
-                <div><span className="text-muted-foreground">角色：</span>{detail.role || "-"}</div>
-                <div><span className="text-muted-foreground">会员类型：</span>{detail.memberType || "-"}</div>
-                <div><span className="text-muted-foreground">用户类型：</span>{detail.userType || "-"}</div>
-                <div className="col-span-2">
-                  <span className="text-muted-foreground">会员状态：</span>
-                  <StatusBadge status={detail.membershipStatus} />
+          <div className="space-y-5 py-5">
+            <section className="rounded-lg border border-[#E5E1DA] bg-[#FCFAF7] p-4">
+              <h4 className="font-semibold text-sm text-[#002B49] mb-3 pb-2 border-b border-[#E5E1DA]">基本信息</h4>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                <div><span className="text-muted-foreground">姓名</span><p className="mt-0.5 font-medium">{detail.name || "-"}</p></div>
+                <div><span className="text-muted-foreground">性别</span><p className="mt-0.5 font-medium">{detail.gender || "-"}</p></div>
+                <div className="col-span-2"><span className="text-muted-foreground">单位</span><p className="mt-0.5 font-medium">{detail.unit || "-"}</p></div>
+                <div><span className="text-muted-foreground">角色</span><p className="mt-0.5 font-medium">{detail.role || "-"}</p></div>
+                <div><span className="text-muted-foreground">会员类型</span><p className="mt-0.5 font-medium">{getMemberCategoryLabel(detail.memberType)}</p></div>
+                <div><span className="text-muted-foreground">用户类型</span><p className="mt-0.5 font-medium">{getUserTypeLabel(detail.userType)}</p></div>
+                <div><span className="text-muted-foreground">有效期至</span><p className="mt-0.5 font-medium">{detail.expiryDate || "-"}</p></div>
+                <div>
+                  <span className="text-muted-foreground">会员状态</span>
+                  <div className="mt-1"><StatusBadge status={detail.membershipStatus} /></div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">是否禁用</span>
+                  <p className="mt-0.5 font-medium">{detail.disabled ? "是" : "否"}</p>
                 </div>
                 <div className="col-span-2">
-                  <span className="text-muted-foreground">绑定分会：</span>
-                  {detail.boundBranches.length > 0
-                    ? detail.boundBranches.map((b) => BRANCH_MAP[b] || b).join("、")
-                    : "无"}
+                  <span className="text-muted-foreground block mb-1.5">绑定分会</span>
+                  <BranchTags branches={detail.boundBranches} branchNames={detail.boundBranchNames} />
                 </div>
-                <div className="col-span-2">
-                  <span className="text-muted-foreground">有效期至：</span>{detail.expiryDate || "-"}
-                </div>
-                <div className="col-span-2">
-                  <span className="text-muted-foreground">是否禁用：</span>{detail.disabled ? "是" : "否"}
-                </div>
-                {/* Phase 6: 入会/退会申请书 */}
                 {detail.membershipAppFileUrl && (
-                  <div className="col-span-2">
-                    <span className="text-muted-foreground">入会申请书：</span>
-                    <Button
-                      variant="link"
-                      className="h-auto p-0 text-blue-600 text-xs"
-                      onClick={() => setPreview({ title: "入会申请书预览", url: detail.membershipAppFileUrl!, name: detail.membershipAppFileName })}
-                    >
-                      {detail.membershipAppFileName || "查看文件"}
-                    </Button>
-                    {detail.membershipAppStatus && (
-                      <span className="ml-2"><StatusBadge status={detail.membershipAppStatus} /></span>
-                    )}
+                  <div className="col-span-2 pt-1 border-t border-[#E5E1DA]">
+                    <span className="text-muted-foreground">入会申请书</span>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="link"
+                        className="h-auto p-0 text-blue-600 text-xs"
+                        onClick={() => setPreview({ title: "入会申请书预览", url: detail.membershipAppFileUrl!, name: detail.membershipAppFileName })}
+                      >
+                        {detail.membershipAppFileName || "查看文件"}
+                      </Button>
+                      {detail.membershipAppStatus && <StatusBadge status={detail.membershipAppStatus} />}
+                    </div>
                     {detail.membershipAppRejectReason && (
-                      <p className="text-red-500 text-[10px] mt-1">驳回原因：{detail.membershipAppRejectReason}</p>
+                      <p className="text-red-500 text-xs mt-1">驳回原因：{detail.membershipAppRejectReason}</p>
                     )}
                   </div>
                 )}
                 {detail.withdrawalAppFileUrl && (
-                  <div className="col-span-2">
-                    <span className="text-muted-foreground">退会申请书：</span>
-                    <Button
-                      variant="link"
-                      className="h-auto p-0 text-blue-600 text-xs"
-                      onClick={() => setPreview({ title: "退会申请书预览", url: detail.withdrawalAppFileUrl!, name: detail.withdrawalAppFileName })}
-                    >
-                      {detail.withdrawalAppFileName || "查看文件"}
-                    </Button>
-                    {detail.withdrawalAppStatus && (
-                      <span className="ml-2"><StatusBadge status={detail.withdrawalAppStatus} /></span>
-                    )}
+                  <div className="col-span-2 pt-1 border-t border-[#E5E1DA]">
+                    <span className="text-muted-foreground">退会申请书</span>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <Button
+                        variant="link"
+                        className="h-auto p-0 text-blue-600 text-xs"
+                        onClick={() => setPreview({ title: "退会申请书预览", url: detail.withdrawalAppFileUrl!, name: detail.withdrawalAppFileName })}
+                      >
+                        {detail.withdrawalAppFileName || "查看文件"}
+                      </Button>
+                      {detail.withdrawalAppStatus && <StatusBadge status={detail.withdrawalAppStatus} />}
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
+            </section>
 
-            <div className="space-y-2">
-              <h4 className="font-semibold text-sm text-strata-blue-deep">缴费记录</h4>
-              {detail.paymentHistory && detail.paymentHistory.length > 0 ? (
+            <section className="rounded-lg border border-[#E5E1DA] bg-white p-4">
+              <div className="flex items-center justify-between mb-3 pb-2 border-b border-[#E5E1DA]">
+                <h4 className="font-semibold text-sm text-[#002B49]">缴费记录</h4>
+                {!paymentsLoading && paymentRows.length > 0 && (
+                  <span className="text-xs text-muted-foreground">共 {paymentRows.length} 条</span>
+                )}
+              </div>
+              {paymentsLoading ? (
                 <div className="space-y-2">
-                  {detail.paymentHistory.map((p) => (
-                    <div key={p.id} className="rounded border p-3 text-xs space-y-1">
-                      <div className="flex justify-between">
-                        <span className="font-medium">{p.type === "society_fee" ? "会员费" : p.targetName}</span>
-                        <span>¥{p.amount}</span>
-                      </div>
-                      <div className="text-muted-foreground">提交：{p.submitTime}</div>
-                      {p.auditTime && <div className="text-muted-foreground">审核：{p.auditTime}</div>}
-                      <StatusBadge status={p.status} />
-                    </div>
-                  ))}
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </div>
+              ) : paymentRows.length > 0 ? (
+                <div className="rounded-md border border-[#E5E1DA] overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-[#FCFAF7] hover:bg-[#FCFAF7]">
+                        <TableHead className="text-xs h-9">类型</TableHead>
+                        <TableHead className="text-xs h-9">金额</TableHead>
+                        <TableHead className="text-xs h-9">状态</TableHead>
+                        <TableHead className="text-xs h-9">提交时间</TableHead>
+                        <TableHead className="text-xs h-9 text-right">附件</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paymentRows.map((p) => (
+                        <TableRow key={p.id}>
+                          <TableCell className="text-xs py-2.5 align-top">
+                            <p className="font-medium text-[#002B49]">
+                              {"memberCategory" in p && p.memberCategory
+                                ? getMemberCategoryLabel(p.memberCategory as string)
+                                : "会员费"}
+                            </p>
+                            {"validEndDate" in p && typeof p.validEndDate === "string" && p.validEndDate && (
+                              <p className="text-muted-foreground mt-0.5">至 {p.validEndDate}</p>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs py-2.5 align-top font-semibold text-[#002B49]">¥{p.amount}</TableCell>
+                          <TableCell className="text-xs py-2.5 align-top">
+                            <PaymentStatusBadge status={p.status === "active" ? "active" : p.status} />
+                            {"reviewComment" in p && typeof p.reviewComment === "string" && p.reviewComment && (
+                              <p className="text-red-600 text-[10px] mt-1 max-w-[140px]">{p.reviewComment}</p>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs py-2.5 align-top text-muted-foreground">
+                            <p>{formatDateTime(p.submitTime)}</p>
+                            {p.auditTime && (p.status === "active" || p.status === "confirmed") && (
+                              <p className="mt-0.5">确认 {formatDateTime(p.auditTime)}</p>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs py-2.5 align-top text-right">
+                            <div className="flex flex-col items-end gap-1">
+                              {p.voucherUrl && (
+                                <Button
+                                  variant="link"
+                                  className="h-auto p-0 text-[11px] text-blue-600"
+                                  onClick={() => setPreview({ title: "缴费凭证", url: p.voucherUrl, name: "凭证" })}
+                                >
+                                  凭证
+                                </Button>
+                              )}
+                              {p.invoiceUrl && (
+                                <Button
+                                  variant="link"
+                                  className="h-auto p-0 text-[11px] text-blue-600"
+                                  onClick={() => setPreview({ title: "电子发票", url: p.invoiceUrl, name: "发票" })}
+                                >
+                                  发票
+                                </Button>
+                              )}
+                              {!p.voucherUrl && !p.invoiceUrl && <span className="text-muted-foreground">—</span>}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">暂无缴费记录</p>
+                <p className="text-sm text-muted-foreground py-4 text-center">暂无缴费记录</p>
               )}
-            </div>
-
-            <div className="space-y-2">
-              <h4 className="font-semibold text-sm text-strata-blue-deep">通知记录</h4>
-              {detail.notifications && detail.notifications.length > 0 ? (
-                <div className="space-y-2">
-                  {detail.notifications.map((n) => (
-                    <div key={n.id} className="rounded border p-2 text-xs">
-                      <div className="font-medium">{n.title}</div>
-                      <div className="text-muted-foreground">{n.content}</div>
-                      <div className="text-muted-foreground mt-1">{n.time}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">暂无通知</p>
-              )}
-            </div>
+            </section>
           </div>
         ) : (
           <div className="flex items-center justify-center h-48 text-muted-foreground">
@@ -353,10 +476,8 @@ export default function MemberManagement() {
                       <TableCell>
                         <StatusBadge status={m.membershipStatus} />
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate" title={m.boundBranches.map(b => BRANCH_MAP[b] || b).join("、")}>
-                        {m.boundBranches.length > 0
-                          ? m.boundBranches.map((b) => BRANCH_MAP[b] || b).join("、")
-                          : "-"}
+                      <TableCell className="max-w-[220px]">
+                        <BranchTags branches={m.boundBranches} branchNames={m.boundBranchNames} />
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {m.expiryDate || "-"}

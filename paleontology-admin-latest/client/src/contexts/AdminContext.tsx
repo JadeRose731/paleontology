@@ -69,15 +69,6 @@ export interface MenuItem {
   children?: MenuItem[];
 }
 
-export interface AdminNotification {
-  id: string;
-  title: string;
-  content: string;
-  time: string;
-  read: boolean;
-  type: "info" | "success" | "warning";
-}
-
 export interface ReviewItem {
   id: string;
   userEmail: string;
@@ -126,6 +117,7 @@ export interface WithdrawalAppRecord {
 }
 
 export interface MemberRecord {
+  userId?: number;
   email: string;
   name: string;
   gender: string;
@@ -134,6 +126,7 @@ export interface MemberRecord {
   memberType?: string;
   membershipStatus: string;
   boundBranches: string[];
+  boundBranchNames?: string[];
   expiryDate?: string;
   userType: string;
   disabled?: boolean;
@@ -157,7 +150,6 @@ export interface MemberDetail extends MemberRecord {
     auditTime?: string;
     status: string;
   }[];
-  notifications: AdminNotification[];
   // Phase 6: 入会/退会申请书
   membershipAppFileUrl?: string;
   membershipAppFileName?: string;
@@ -459,10 +451,6 @@ interface AdminContextType {
   getAllBranches(): BranchRecord[];
   updateBranch(id: string, data: Partial<BranchRecord>): void;
   toggleBranchDisabled(id: string): void;
-  notifications: AdminNotification[];
-  addNotification(n: Omit<AdminNotification, "id" | "time" | "read">): void;
-  markAllRead(): void;
-  unreadCount: number;
 }
 
 // ============================================================================
@@ -798,10 +786,6 @@ function addWorkdays(dateStr: string, workdays: number): string {
     if (day !== 0 && day !== 6) added++;
   }
   return d.toISOString().split("T")[0];
-}
-
-function generateId(): string {
-  return `admin-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // Phase 1: 数据权限过滤 —— 分会管理员只能看到本分会的数据
@@ -1163,26 +1147,6 @@ const SEED_USERS: SeedUser[] = [
     unit: "中国古生物学会",
     role: "教师",
     title: "高级工程师",
-    memberType: "普通会员",
-  },
-  {
-    email: "member@paleontology.org.cn",
-    password: "password123",
-    name: "张华",
-    gender: "男",
-    unit: "中国科学院古脊椎动物与古人类研究所",
-    role: "教师",
-    title: "研究员",
-    memberType: "普通会员",
-  },
-  {
-    email: "student@paleontology.org.cn",
-    password: "password123",
-    name: "李萌",
-    gender: "女",
-    unit: "南京大学地科院",
-    role: "学生",
-    title: "硕士研究生",
     memberType: "普通会员",
   },
   {
@@ -1562,23 +1526,6 @@ const SEED_MEMBERSHIPS: Record<string, SeedMembership> = {
     status: "not_member",
     history: [],
   },
-  // 张华 — 有效会员
-  "member@paleontology.org.cn": makeActiveMembership(200, "2026-03-15 14:30"),
-  // 李萌 — 凭证初审中
-  "student@paleontology.org.cn": {
-    status: "voucher_submitted",
-    history: [
-      {
-        id: "pay-stu-1",
-        type: "society_fee",
-        targetName: "中国古生物学会会员费",
-        amount: 100,
-        voucherUrl: "",
-        submitTime: "2026-06-10 10:20",
-        status: "voucher_submitted",
-      },
-    ],
-  },
   // 王莉 — 待上传发票
   "wangli@paleontology.org.cn": {
     status: "invoice_pending",
@@ -1659,8 +1606,6 @@ const SEED_MEMBERSHIPS: Record<string, SeedMembership> = {
 const SEED_BRANCH_BINDINGS: Record<string, string[]> = {
   // 原有用户
   "demo@paleontology.org.cn": ["gjzdw", "wtxfh"],
-  "member@paleontology.org.cn": ["gjzdw", "gzwxfh", "bfxfh"],
-  "student@paleontology.org.cn": ["gst", "dqswx"],
   "wangli@paleontology.org.cn": ["wtxfh", "gzwxfh", "swcj"],
   "zhaoqiang@paleontology.org.cn": ["gjzdw"],
   // ── 古脊椎动物学分会 (gjzdw) — 目标 ~8 人 ──
@@ -1708,8 +1653,6 @@ const SEED_BRANCH_BINDINGS: Record<string, string[]> = {
 
 const SEED_USER_TYPES: Record<string, string> = {
   "demo@paleontology.org.cn": "non_member",
-  "member@paleontology.org.cn": "member",
-  "student@paleontology.org.cn": "member",
   "wangli@paleontology.org.cn": "member",
   "zhaoqiang@paleontology.org.cn": "member",
   "chenming@paleontology.org.cn": "member",
@@ -1790,36 +1733,6 @@ function makeDemoConfReg(
 
 /** 各用户会议报名 + 参会提交信息（报告/住宿/野外）演示数据 */
 const SEED_CONFERENCE_SUBMISSIONS: SeedConferenceReg = {
-  "member@paleontology.org.cn": {
-    "conf-zgswxh-1": makeDemoConfReg({
-      name: "张华",
-      gender: "男",
-      unit: "中国科学院古脊椎动物与古人类研究所",
-      role: "教师",
-      feeType: CONFERENCE_FEE_TYPE.NON_STUDENT_MEMBER,
-      lockedAmount: 1500,
-      presentationType: "口头报告",
-      reportTitle: "早白垩世热河生物群鸟类化石新发现",
-      withAbstract: true,
-      accommodationType: ACCOMMODATION_TYPE.MALE_SINGLE,
-      fieldTripSelections: { pre: ["zgs1-pre-1"], during: ["zgs1-during-1"], post: [] },
-    }),
-  },
-  "student@paleontology.org.cn": {
-    "conf-zgswxh-1": makeDemoConfReg({
-      name: "李萌",
-      gender: "女",
-      unit: "南京大学地科院",
-      role: "学生",
-      feeType: CONFERENCE_FEE_TYPE.STUDENT_MEMBER,
-      lockedAmount: 1000,
-      presentationType: "展板报告",
-      reportTitle: "华南二叠纪腕足动物群落演化",
-      withAbstract: true,
-      accommodationType: ACCOMMODATION_TYPE.FEMALE_DOUBLE,
-      fieldTripSelections: { pre: [], during: [], post: ["zgs1-post-1"] },
-    }),
-  },
   "demo@paleontology.org.cn": {
     "conf-zgswxh-1": makeDemoConfReg({
       name: "演示用户",
@@ -1939,6 +1852,7 @@ function seedDemoData() {
 
 function mapDirectoryRow(row: ApiMemberDirectoryRow): MemberRecord {
   return {
+    userId: row.userId,
     email: row.email,
     name: row.userName || row.email,
     gender: row.gender || "",
@@ -1947,6 +1861,7 @@ function mapDirectoryRow(row: ApiMemberDirectoryRow): MemberRecord {
     memberType: row.memberCategory,
     membershipStatus: row.membershipStatus || MEMBERSHIP_STATUS.NOT_MEMBER,
     boundBranches: Array.isArray(row.boundBranches) ? row.boundBranches : [],
+    boundBranchNames: Array.isArray(row.boundBranchNames) ? row.boundBranchNames : undefined,
     expiryDate: row.validEndDate,
     userType: row.userType || "regular",
     disabled: row.membershipStatus === MEMBERSHIP_STATUS.EXPIRED,
@@ -1961,7 +1876,6 @@ const AdminContext = createContext<AdminContextType | undefined>(undefined);
 
 export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
-  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [cmsMenuChildren, setCmsMenuChildren] = useState<MenuItem[] | null>(null);
   const [cmsRoutePermissions, setCmsRoutePermissions] = useState<Record<string, AdminRole[]>>({});
@@ -1983,8 +1897,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
       }
     }
-    const storedNotifs = localStorage.getItem("paleo_admin_notifications");
-    if (storedNotifs) setNotifications(JSON.parse(storedNotifs));
     if (!localStorage.getItem("paleo_admin_db")) {
       localStorage.setItem("paleo_admin_db", JSON.stringify(BUILT_IN_ADMINS));
     }
@@ -1994,10 +1906,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Seed demo data so admin panel has realistic data on first load
     seedDemoData();
     seedDemoConferenceSubmissions();
-  }, []);
-
-  const persistNotifications = useCallback((n: AdminNotification[]) => {
-    localStorage.setItem("paleo_admin_notifications", JSON.stringify(n));
   }, []);
 
   // ==========================================
@@ -2125,37 +2033,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     return findFirstLeaf(cmsChildren) ?? (adminRole === "branch_admin" ? "/admin/cms/branch" : "/admin/cms/banners");
   }, [adminRole, cmsMenuChildren]);
-
-  // ==========================================
-  // NOTIFICATIONS
-  // ==========================================
-
-  const addNotification = useCallback(
-    (n: Omit<AdminNotification, "id" | "time" | "read">) => {
-      const newNotif: AdminNotification = {
-        id: generateId(),
-        time: new Date().toLocaleString("zh-CN"),
-        read: false,
-        ...n,
-      };
-      setNotifications(prev => {
-        const updated = [newNotif, ...prev];
-        persistNotifications(updated);
-        return updated;
-      });
-    },
-    [persistNotifications]
-  );
-
-  const markAllRead = useCallback(() => {
-    setNotifications(prev => {
-      const updated = prev.map(n => ({ ...n, read: true }));
-      persistNotifications(updated);
-      return updated;
-    });
-  }, [persistNotifications]);
-
-  const unreadCount = notifications.filter(n => !n.read).length;
 
   // ==========================================
   // AUDIT — Build review queues (from backend API)
@@ -2355,11 +2232,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             toast.error("无效审核记录");
             return;
           }
-          addNotification({
-            title: "初审已通过",
-            content: `${targetEmail} 的${type === "society_fee" ? "会员费" : "会议费"}凭证初审已通过`,
-            type: "success",
-          });
           toast.success("初审已通过，已通知用户上传发票");
           triggerRefresh();
           await loadReviewQueues();
@@ -2368,7 +2240,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       })();
     },
-    [addNotification, triggerRefresh, pendingVoucherReviews, loadReviewQueues],
+    [triggerRefresh, pendingVoucherReviews, loadReviewQueues],
   );
 
   const rejectVoucher = useCallback(
@@ -2388,11 +2260,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             toast.error("无效审核记录");
             return;
           }
-          addNotification({
-            title: "初审已驳回",
-            content: `${targetEmail} 的凭证已被驳回，原因：${reason}`,
-            type: "warning",
-          });
           toast.success("初审已驳回");
           triggerRefresh();
           await loadReviewQueues();
@@ -2401,7 +2268,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       })();
     },
-    [addNotification, triggerRefresh, pendingVoucherReviews, loadReviewQueues],
+    [triggerRefresh, pendingVoucherReviews, loadReviewQueues],
   );
 
   const approveInvoice = useCallback(
@@ -2421,11 +2288,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             toast.error("无效审核记录");
             return;
           }
-          addNotification({
-            title: "终审已通过",
-            content: `${targetEmail} 的${type === "society_fee" ? "会员费" : "会议费"}终审已通过`,
-            type: "success",
-          });
           toast.success("终审已通过");
           triggerRefresh();
           await loadReviewQueues();
@@ -2434,7 +2296,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       })();
     },
-    [addNotification, triggerRefresh, pendingInvoiceReviews, loadReviewQueues],
+    [triggerRefresh, pendingInvoiceReviews, loadReviewQueues],
   );
 
   const rejectInvoice = useCallback(
@@ -2454,11 +2316,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             toast.error("无效审核记录");
             return;
           }
-          addNotification({
-            title: "终审已驳回",
-            content: `${targetEmail} 的发票已被驳回，原因：${reason}`,
-            type: "warning",
-          });
           toast.success("终审已驳回");
           triggerRefresh();
           await loadReviewQueues();
@@ -2467,7 +2324,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       })();
     },
-    [addNotification, triggerRefresh, pendingInvoiceReviews, loadReviewQueues],
+    [triggerRefresh, pendingInvoiceReviews, loadReviewQueues],
   );
 
   // ==========================================
@@ -2541,15 +2398,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           syncAdminToUserStorage(key);
         }
       }
-      addNotification({
-        title: "已延期",
-        content: `${targetEmail} 的上传期限已延至 ${newDeadline}，理由：${reason}`,
-        type: "info",
-      });
       toast.success(`已延期至 ${newDeadline}`);
       triggerRefresh();
     },
-    [addNotification, triggerRefresh]
+    [triggerRefresh]
   );
 
   // ==========================================
@@ -2609,9 +2461,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const key = `paleo_admin_society_membership_${email}`;
     const stored = localStorage.getItem(key);
     const membership = stored ? JSON.parse(stored) : { history: [] };
-    const notifsKey = `paleo_admin_notifs_${email}`;
-    const storedNotifs = localStorage.getItem(notifsKey);
-    const userNotifs: AdminNotification[] = storedNotifs ? JSON.parse(storedNotifs) : [];
     // Phase 6: 入会/退会申请书
     const appKey = `paleo_admin_membership_application_${email}`;
     const storedApp = localStorage.getItem(appKey);
@@ -2622,7 +2471,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return {
       ...member,
       paymentHistory: membership.history || [],
-      notifications: userNotifs,
       membershipAppFileUrl: appData?.applicationFileUrl,
       membershipAppFileName: appData?.applicationFileName,
       membershipAppStatus: appData?.status,
@@ -3330,11 +3178,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       try {
         await reviewMembershipApplication(applicationId, "APPROVED");
-        addNotification({
-          title: "入会申请已通过",
-          content: `${app.userEmail} 的入会申请书已审核通过`,
-          type: "success",
-        });
         toast.success("入会申请已通过，用户可进入缴费阶段");
         triggerRefresh();
         await loadApplicationQueues();
@@ -3342,7 +3185,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         toast.error(e instanceof Error ? e.message : "审核失败");
       }
     })();
-  }, [addNotification, triggerRefresh, pendingMembershipApps, loadApplicationQueues]);
+  }, [triggerRefresh, pendingMembershipApps, loadApplicationQueues]);
 
   const rejectMembershipApplication = useCallback((applicationId: number, reason: string) => {
     void (async () => {
@@ -3353,11 +3196,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       try {
         await reviewMembershipApplication(applicationId, "REJECTED", reason);
-        addNotification({
-          title: "入会申请已驳回",
-          content: `${app.userEmail} 的入会申请书已被驳回，原因：${reason}`,
-          type: "warning",
-        });
         toast.success("入会申请已驳回");
         triggerRefresh();
         await loadApplicationQueues();
@@ -3365,7 +3203,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         toast.error(e instanceof Error ? e.message : "审核失败");
       }
     })();
-  }, [addNotification, triggerRefresh, pendingMembershipApps, loadApplicationQueues]);
+  }, [triggerRefresh, pendingMembershipApps, loadApplicationQueues]);
 
   const approveWithdrawalApplication = useCallback((applicationId: number) => {
     void (async () => {
@@ -3376,11 +3214,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       try {
         await reviewMembershipApplication(applicationId, "APPROVED");
-        addNotification({
-          title: "退会申请已通过",
-          content: `${app.userEmail} 的退会申请已通过，会员资格已终止`,
-          type: "info",
-        });
         toast.success("退会申请已通过");
         triggerRefresh();
         await loadApplicationQueues();
@@ -3388,7 +3221,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         toast.error(e instanceof Error ? e.message : "审核失败");
       }
     })();
-  }, [addNotification, triggerRefresh, pendingWithdrawalApps, loadApplicationQueues]);
+  }, [triggerRefresh, pendingWithdrawalApps, loadApplicationQueues]);
 
   const rejectWithdrawalApplication = useCallback((applicationId: number, reason: string) => {
     void (async () => {
@@ -3399,11 +3232,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       try {
         await reviewMembershipApplication(applicationId, "REJECTED", reason);
-        addNotification({
-          title: "退会申请已驳回",
-          content: `${app.userEmail} 的退会申请已被驳回，原因：${reason}`,
-          type: "warning",
-        });
         toast.success("退会申请已驳回");
         triggerRefresh();
         await loadApplicationQueues();
@@ -3411,7 +3239,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         toast.error(e instanceof Error ? e.message : "审核失败");
       }
     })();
-  }, [addNotification, triggerRefresh, pendingWithdrawalApps, loadApplicationQueues]);
+  }, [triggerRefresh, pendingWithdrawalApps, loadApplicationQueues]);
 
   // 模板管理
   const setMembershipApplicationTemplateAction = useCallback((fileUrl: string, fileName: string) => {
@@ -3467,13 +3295,9 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     if (expiredCount > 0) {
-      addNotification({
-        title: "会员过期检查完成",
-        content: `已自动标记 ${expiredCount} 名过期会员`,
-        type: "info",
-      });
+      triggerRefresh();
     }
-  }, [addNotification]);
+  }, [triggerRefresh]);
 
   // ==========================================
   // BRANCH MANAGEMENT
@@ -3585,10 +3409,6 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     getAllBranches,
     updateBranch,
     toggleBranchDisabled,
-    notifications,
-    addNotification,
-    markAllRead,
-    unreadCount,
   };
 
   return (

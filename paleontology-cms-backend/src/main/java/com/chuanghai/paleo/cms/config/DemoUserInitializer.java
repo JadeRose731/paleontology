@@ -17,8 +17,6 @@ public class DemoUserInitializer implements CommandLineRunner {
 
     private static final String[][] DEMO_USERS = {
             {"demo@paleontology.org.cn", "demo123", "演示用户", "男", "中国古生物学会", "教师", "高级工程师", "0"},
-            {"member@paleontology.org.cn", "password123", "张华", "男", "中国科学院古脊椎动物与古人类研究所", "教师", "研究员", "0"},
-            {"student@paleontology.org.cn", "password123", "李萌", "女", "南京大学地科院", "学生", "硕士研究生", "1"},
     };
 
     @Autowired

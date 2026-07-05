@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import org.springframework.util.StringUtils;
+
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
@@ -57,6 +59,47 @@ public class PaleoMembershipPaymentService extends ServiceImpl<PaleoMembershipPa
             memberProfileService.activateByPayment(payment, reviewer);
         }
         return updated;
+    }
+
+    /** Reuse an empty UNPAID draft instead of creating duplicate rows on each submit attempt. */
+    public PaleoMembershipPayment getOrCreateDraft(PaleoMembershipPayment incoming, String operator) {
+        PaleoMembershipPayment draft = getOne(new LambdaQueryWrapper<PaleoMembershipPayment>()
+                .eq(PaleoMembershipPayment::getUserId, incoming.getUserId())
+                .eq(PaleoMembershipPayment::getPaymentStatus, "UNPAID")
+                .and(w -> w.isNull(PaleoMembershipPayment::getVoucherUrl)
+                        .or().eq(PaleoMembershipPayment::getVoucherUrl, ""))
+                .orderByDesc(PaleoMembershipPayment::getCreateTime)
+                .last("LIMIT 1"));
+        if (draft != null) {
+            if (incoming.getMemberCategory() != null) {
+                draft.setMemberCategory(incoming.getMemberCategory());
+            }
+            if (incoming.getAmount() != null) {
+                draft.setAmount(incoming.getAmount());
+            }
+            if (incoming.getApplicationId() != null) {
+                draft.setApplicationId(incoming.getApplicationId());
+            }
+            draft.setUpdateBy(operator);
+            updateById(draft);
+            return draft;
+        }
+        incoming.setPaymentId(null);
+        incoming.setPaymentStatus("UNPAID");
+        incoming.setCreateBy(operator);
+        save(incoming);
+        return incoming;
+    }
+
+    public boolean isDisplayable(PaleoMembershipPayment payment) {
+        if (payment == null) {
+            return false;
+        }
+        if ("UNPAID".equalsIgnoreCase(payment.getPaymentStatus())
+                && !StringUtils.hasText(payment.getVoucherUrl())) {
+            return false;
+        }
+        return true;
     }
 
     public List<PaleoMembershipPayment> listPendingReviews(String phase) {

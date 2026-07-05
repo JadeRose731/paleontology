@@ -139,16 +139,28 @@ export default function PersonalCenter() {
   const rawHistory = societyMembership?.history || [];
   const societyPayHistory = rawHistory.length > 0
     ? rawHistory
-    : (societyMembership?.status && societyMembership.status !== "not_member")
+    : (societyMembership?.status === "active"
+      || societyMembership?.status === "voucher_submitted"
+      || societyMembership?.status === "invoice_submitted"
+      || societyMembership?.status === "invoice_pending"
+      || societyMembership?.status === "invoice_overdue"
+      || societyMembership?.status === "voucher_rejected"
+      || societyMembership?.status === "invoice_rejected")
       ? [{
           id: "auto",
           type: "society_fee" as const,
           targetName: "中国古生物学会会员费",
           amount: societyMembership.amount || MEMBER_FEE,
-          voucherUrl: "",
-          invoiceUrl: "",
-          submitTime: societyMembership.expiryDate ? "-" : "-",
-          status: societyMembership.status === "active" ? "approved" as const : societyMembership.status === "voucher_submitted" || societyMembership.status === "pending" ? "voucher_submitted" as const : societyMembership.status === "invoice_submitted" ? "invoice_submitted" as const : "rejected" as const
+          voucherUrl: societyMembership.history?.[0]?.voucherUrl || "",
+          invoiceUrl: societyMembership.history?.[0]?.invoiceUrl || "",
+          submitTime: societyMembership.history?.[0]?.submitTime || "-",
+          status: societyMembership.status === "active"
+            ? "approved" as const
+            : societyMembership.status === "voucher_submitted"
+              ? "voucher_submitted" as const
+              : societyMembership.status === "invoice_submitted"
+                ? "invoice_submitted" as const
+                : "rejected" as const,
         }]
       : [];
   const confPayHistory = Object.entries(conferenceRegs || {})

@@ -86,6 +86,24 @@ export const USER_TYPE_LABEL: Record<string, string> = {
   member:      "正式会员",
 };
 
+/** 会员类别（与四类会议费类型一致）→ 中文标签 */
+export const MEMBER_CATEGORY_LABEL: Record<string, string> = {
+  student_member:         "学生会员",
+  non_student_member:   "非学生会员",
+  student_non_member:   "学生（非会员）",
+  non_student_non_member: "非学生（非会员）",
+};
+
+export function getMemberCategoryLabel(category?: string | null): string {
+  if (!category) return "-";
+  return MEMBER_CATEGORY_LABEL[category] || category;
+}
+
+export function getUserTypeLabel(userType?: string | null): string {
+  if (!userType) return "-";
+  return USER_TYPE_LABEL[userType] || userType;
+}
+
 // ── 用户身份扩展（学生/非学生维度） Phase 0 新增 ──────────────────────────
 
 export const USER_IDENTITY = {
@@ -189,6 +207,39 @@ export const VALID_BRANCH_IDS = new Set(BRANCH_IDS);
 
 /** 所有学会单元 ID 列表（总学会 + 11 分会） */
 export const ALL_SOCIETY_IDS: string[] = Object.keys(ALL_SOCIETY_UNITS);
+
+/** 后端 association_id → 分会名称（V11 种子，无 DB 时的兜底） */
+export const ASSOCIATION_ID_LABEL: Record<string, string> = {
+  "1": "中国古生物学会（总学会）",
+  "2": "古无脊椎动物学分会",
+  "3": "古植物学分会",
+  "4": "科普工作委员会",
+  "5": "地层学分会",
+  "6": "微体学分会",
+  "7": "化石藻类专业委员会",
+  "8": "古脊椎动物学分会",
+  "9": "早期生命研究分会",
+  "10": "古生态学分会",
+  "11": "孢粉学分会",
+  "12": "遗迹学分会",
+};
+
+/** 将绑定分会 ID 转为中文名称 */
+export function formatBoundBranchLabel(branchId: string): string {
+  return BRANCH_MAP[branchId] || ALL_SOCIETY_UNITS[branchId] || ASSOCIATION_ID_LABEL[branchId] || branchId;
+}
+
+/** 格式化绑定分会列表；优先使用 API 返回的 boundBranchNames */
+export function formatBoundBranchList(
+  branches: string[],
+  branchNames?: string[],
+): string {
+  if (branchNames && branchNames.length > 0) {
+    return branchNames.join("、");
+  }
+  if (!branches.length) return "-";
+  return branches.map(formatBoundBranchLabel).join("、");
+}
 
 /** 会议 ID → 所属学会/分会 ID 映射 */
 export const CONFERENCE_BRANCH_MAP: Record<string, string> = {
