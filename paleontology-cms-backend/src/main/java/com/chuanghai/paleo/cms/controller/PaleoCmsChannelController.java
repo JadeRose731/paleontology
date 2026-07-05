@@ -10,7 +10,7 @@ import com.chuanghai.paleo.cms.domain.PaleoCmsChannel;
 import com.chuanghai.paleo.cms.domain.PaleoCmsEntry;
 import com.chuanghai.paleo.cms.security.Anonymous;
 import com.chuanghai.paleo.cms.security.LoginUser;
-import com.chuanghai.paleo.cms.service.CmsScopeService;
+import com.chuanghai.paleo.cms.service.AdminScopeService;
 import com.chuanghai.paleo.cms.service.PaleoCmsBlockService;
 import com.chuanghai.paleo.cms.service.PaleoCmsChannelService;
 import com.chuanghai.paleo.cms.service.PaleoCmsEntryService;
@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,17 +43,21 @@ public class PaleoCmsChannelController extends BaseController {
     private PaleoCmsEntryService entryService;
 
     @Autowired
-    private CmsScopeService scopeService;
+    private AdminScopeService adminScopeService;
 
     @ApiOperation("管理端-栏目树")
     @GetMapping("/tree")
     public AjaxResult tree(PaleoCmsChannel query) {
         LoginUser user = currentUser();
-        if (user != null && "branch_admin".equals(user.getRole()) && StringUtils.hasText(user.getBranchId())) {
-            query.setAssociationId(Long.parseLong(user.getBranchId()));
+        LambdaQueryWrapper<PaleoCmsChannel> wrapper = channelQuery(query).orderByAsc(PaleoCmsChannel::getSortOrder);
+        if (user != null && adminScopeService.isBranchAdmin(user)) {
+            List<Long> accessible = adminScopeService.resolveAccessibleAssociationIds(user);
+            if (accessible.isEmpty()) {
+                return success(Collections.emptyList());
+            }
+            wrapper.in(PaleoCmsChannel::getAssociationId, accessible);
         }
-        List<PaleoCmsChannel> channels = channelService.list(channelQuery(query)
-                .orderByAsc(PaleoCmsChannel::getSortOrder));
+        List<PaleoCmsChannel> channels = channelService.list(wrapper);
         return success(CmsChannelTreeUtil.buildTree(channels, 0L));
     }
 
@@ -62,11 +67,15 @@ public class PaleoCmsChannelController extends BaseController {
                               @RequestParam(defaultValue = "1") int pageNum,
                               @RequestParam(defaultValue = "50") int pageSize) {
         LoginUser user = currentUser();
-        if (user != null && "branch_admin".equals(user.getRole()) && StringUtils.hasText(user.getBranchId())) {
-            query.setAssociationId(Long.parseLong(user.getBranchId()));
+        LambdaQueryWrapper<PaleoCmsChannel> wrapper = channelQuery(query).orderByAsc(PaleoCmsChannel::getSortOrder);
+        if (user != null && adminScopeService.isBranchAdmin(user)) {
+            List<Long> accessible = adminScopeService.resolveAccessibleAssociationIds(user);
+            if (accessible.isEmpty()) {
+                return getDataTable(Collections.emptyList());
+            }
+            wrapper.in(PaleoCmsChannel::getAssociationId, accessible);
         }
-        Page<PaleoCmsChannel> page = channelService.page(new Page<>(pageNum, pageSize), channelQuery(query)
-                .orderByAsc(PaleoCmsChannel::getSortOrder));
+        Page<PaleoCmsChannel> page = channelService.page(new Page<>(pageNum, pageSize), wrapper);
         return getDataTable(page);
     }
 
@@ -75,7 +84,7 @@ public class PaleoCmsChannelController extends BaseController {
     public AjaxResult info(@PathVariable Long channelId) {
         PaleoCmsChannel channel = channelService.getById(channelId);
         LoginUser user = currentUser();
-        if (channel == null || "1".equals(channel.getDeleted()) || !scopeService.canAccessAssociation(user, channel.getAssociationId())) {
+        if (channel == null || "1".equals(channel.getDeleted()) || !adminScopeService.canAccessAssociation(user, channel.getAssociationId())) {
             return error("栏目不存在或无权访问");
         }
         return success(channel);
@@ -173,8 +182,13 @@ public class PaleoCmsChannelController extends BaseController {
     @PostMapping
     public AjaxResult add(@RequestBody PaleoCmsChannel channel) {
         LoginUser user = currentUser();
-        if (!scopeService.canAccessAssociation(user, channel.getAssociationId())) {
-            return error("无权新增该栏目");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (!adminScopeService.canAccessAssociation(user, channel.getAssociationId())) {
+                return error("无权新增该栏目");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         normalizeChannel(channel, true);
         channel.setCreateBy(getUsername());
@@ -186,8 +200,13 @@ public class PaleoCmsChannelController extends BaseController {
     public AjaxResult edit(@RequestBody PaleoCmsChannel channel) {
         LoginUser user = currentUser();
         PaleoCmsChannel old = channelService.getById(channel.getChannelId());
-        if (old == null || "1".equals(old.getDeleted()) || !scopeService.canAccessAssociation(user, old.getAssociationId())) {
-            return error("无权修改该栏目");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (old == null || "1".equals(old.getDeleted()) || !adminScopeService.canAccessAssociation(user, old.getAssociationId())) {
+                return error("无权修改该栏目");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         if ("1".equals(old.getLocked())) {
             channel.setChannelCode(old.getChannelCode());
@@ -203,8 +222,13 @@ public class PaleoCmsChannelController extends BaseController {
     public AjaxResult updateStatus(@PathVariable Long channelId, @RequestBody Map<String, String> body) {
         LoginUser user = currentUser();
         PaleoCmsChannel channel = channelService.getById(channelId);
-        if (channel == null || "1".equals(channel.getDeleted()) || !scopeService.canAccessAssociation(user, channel.getAssociationId())) {
-            return error("无权修改栏目状态");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (channel == null || "1".equals(channel.getDeleted()) || !adminScopeService.canAccessAssociation(user, channel.getAssociationId())) {
+                return error("无权修改栏目状态");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         String status = body == null ? null : body.get("status");
         if (!"DRAFT".equals(status) && !"PUBLISHED".equals(status) && !"ARCHIVED".equals(status)) {
@@ -220,8 +244,13 @@ public class PaleoCmsChannelController extends BaseController {
     public AjaxResult delete(@PathVariable Long channelId) {
         LoginUser user = currentUser();
         PaleoCmsChannel channel = channelService.getById(channelId);
-        if (channel == null || "1".equals(channel.getDeleted()) || !scopeService.canAccessAssociation(user, channel.getAssociationId())) {
-            return error("无权删除该栏目");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (channel == null || "1".equals(channel.getDeleted()) || !adminScopeService.canAccessAssociation(user, channel.getAssociationId())) {
+                return error("无权删除该栏目");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         if ("1".equals(channel.getLocked())) {
             return error("定制页栏目不可删除");
@@ -237,7 +266,7 @@ public class PaleoCmsChannelController extends BaseController {
     public AjaxResult listBlocks(@PathVariable Long channelId) {
         LoginUser user = currentUser();
         PaleoCmsChannel channel = channelService.getById(channelId);
-        if (channel == null || !scopeService.canAccessAssociation(user, channel.getAssociationId())) {
+        if (channel == null || !adminScopeService.canAccessAssociation(user, channel.getAssociationId())) {
             return error("无权查看区块");
         }
         return success(blockService.list(new LambdaQueryWrapper<PaleoCmsBlock>()
@@ -251,8 +280,13 @@ public class PaleoCmsChannelController extends BaseController {
     public AjaxResult saveBlock(@PathVariable Long channelId, @RequestBody PaleoCmsBlock block) {
         LoginUser user = currentUser();
         PaleoCmsChannel channel = channelService.getById(channelId);
-        if (channel == null || !scopeService.canAccessAssociation(user, channel.getAssociationId())) {
-            return error("无权维护区块");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (channel == null || !adminScopeService.canAccessAssociation(user, channel.getAssociationId())) {
+                return error("无权维护区块");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         block.setChannelId(channelId);
         if (block.getBlockId() == null) {
@@ -281,8 +315,13 @@ public class PaleoCmsChannelController extends BaseController {
         }
         PaleoCmsChannel channel = channelService.getById(block.getChannelId());
         LoginUser user = currentUser();
-        if (channel == null || !scopeService.canAccessAssociation(user, channel.getAssociationId())) {
-            return error("无权删除区块");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (channel == null || !adminScopeService.canAccessAssociation(user, channel.getAssociationId())) {
+                return error("无权删除区块");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         block.setDeleted("1");
         block.setStatus("ARCHIVED");

@@ -1,6 +1,6 @@
 /** 管理端会员/会议审核 API — 对接 paleontology-cms-backend */
 
-import { ensureCmsAuth } from "./cms-api";
+import { ensureCmsAuth, handleCmsUnauthorized, CmsAuthError } from "./cms-api";
 
 const CMS_TOKEN_KEY = "paleo_cms_token";
 const API_BASE = import.meta.env.VITE_CMS_API_BASE ?? "";
@@ -58,6 +58,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   const json = (await res.json()) as ApiResponse<T>;
+  if (res.status === 401 || json.code === 401) {
+    handleCmsUnauthorized();
+    throw new CmsAuthError(json.msg || "未登录或 token 已过期", 401);
+  }
   if (!res.ok || json.code !== 200) {
     throw new Error(json.msg || "请求失败");
   }
@@ -219,6 +223,10 @@ export async function uploadMembershipTemplate(templateType: "JOIN" | "WITHDRAW"
     body: form,
   });
   const json = (await res.json()) as ApiResponse;
+  if (res.status === 401 || json.code === 401) {
+    handleCmsUnauthorized();
+    throw new CmsAuthError(json.msg || "未登录或 token 已过期", 401);
+  }
   if (!res.ok || json.code !== 200) {
     throw new Error(json.msg || "模板上传失败");
   }

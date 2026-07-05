@@ -7,6 +7,9 @@ import com.chuanghai.paleo.cms.common.BaseController;
 import com.chuanghai.paleo.cms.common.TableDataInfo;
 import com.chuanghai.paleo.cms.domain.PaleoConference;
 import com.chuanghai.paleo.cms.domain.PaleoConferenceRegistration;
+import com.chuanghai.paleo.cms.security.LoginUser;
+import com.chuanghai.paleo.cms.security.RequireAdminRole;
+import com.chuanghai.paleo.cms.service.AdminScopeService;
 import com.chuanghai.paleo.cms.mapper.PaleoConferenceMapper;
 import com.chuanghai.paleo.cms.service.LocalFileStorageService;
 import com.chuanghai.paleo.cms.service.PaleoConferenceRegistrationService;
@@ -35,6 +38,9 @@ public class PaleoConferenceController extends BaseController {
     @Autowired
     private LocalFileStorageService fileStorageService;
 
+    @Autowired
+    private AdminScopeService adminScopeService;
+
     @ApiOperation("公开-开放会议列表")
     @GetMapping("/public/list")
     public AjaxResult publicList() {
@@ -54,17 +60,19 @@ public class PaleoConferenceController extends BaseController {
         return success(registrationService.listMine(userId));
     }
 
+    @RequireAdminRole({"super_admin", "branch_admin", "finance_reviewer"})
     @ApiOperation("管理端-会议报名列表")
     @GetMapping("/registrations/list")
     public TableDataInfo registrationList(PaleoConferenceRegistration query,
                                           @RequestParam(defaultValue = "1") int pageNum,
                                           @RequestParam(defaultValue = "20") int pageSize) {
-        Page<PaleoConferenceRegistration> page = registrationService.page(new Page<>(pageNum, pageSize),
-                new LambdaQueryWrapper<PaleoConferenceRegistration>()
-                        .eq(query.getConferenceId() != null, PaleoConferenceRegistration::getConferenceId, query.getConferenceId())
-                        .eq(query.getUserId() != null, PaleoConferenceRegistration::getUserId, query.getUserId())
-                        .eq(StringUtils.hasText(query.getPaymentStatus()), PaleoConferenceRegistration::getPaymentStatus, query.getPaymentStatus())
-                        .orderByDesc(PaleoConferenceRegistration::getCreateTime));
+        LoginUser user = currentUser();
+        LambdaQueryWrapper<PaleoConferenceRegistration> wrapper = registrationService.adminScopeWrapper(user)
+                .eq(query.getConferenceId() != null, PaleoConferenceRegistration::getConferenceId, query.getConferenceId())
+                .eq(query.getUserId() != null, PaleoConferenceRegistration::getUserId, query.getUserId())
+                .eq(StringUtils.hasText(query.getPaymentStatus()), PaleoConferenceRegistration::getPaymentStatus, query.getPaymentStatus())
+                .orderByDesc(PaleoConferenceRegistration::getCreateTime);
+        Page<PaleoConferenceRegistration> page = registrationService.page(new Page<>(pageNum, pageSize), wrapper);
         page.getRecords().forEach(registrationService::enrichRegistration);
         return getDataTable(page);
     }
@@ -116,9 +124,15 @@ public class PaleoConferenceController extends BaseController {
         }
     }
 
+    @RequireAdminRole({"super_admin", "branch_admin", "finance_reviewer"})
     @ApiOperation("管理端-审核会议费")
     @PostMapping("/registrations/{registrationId}/review")
     public AjaxResult reviewRegistration(@PathVariable Long registrationId, @RequestBody Map<String, String> body) {
+        try {
+            registrationService.assertCanAccessRegistration(currentUser(), registrationId);
+        } catch (Exception ex) {
+            return error(ex.getMessage());
+        }
         return toAjax(registrationService.review(
                 registrationId,
                 body.get("paymentStatus"),
@@ -126,16 +140,18 @@ public class PaleoConferenceController extends BaseController {
                 getUsername()));
     }
 
+    @RequireAdminRole({"super_admin", "branch_admin", "finance_reviewer"})
     @ApiOperation("管理端-待审凭证（会议费）")
     @GetMapping("/registrations/reviews/pending-vouchers")
     public AjaxResult pendingVoucherReviews() {
-        return success(registrationService.listPendingReviews("voucher"));
+        return success(registrationService.listPendingReviewsForAdmin(currentUser(), "voucher"));
     }
 
+    @RequireAdminRole({"super_admin", "branch_admin", "finance_reviewer"})
     @ApiOperation("管理端-待审发票（会议费）")
     @GetMapping("/registrations/reviews/pending-invoices")
     public AjaxResult pendingInvoiceReviews() {
-        return success(registrationService.listPendingReviews("invoice"));
+        return success(registrationService.listPendingReviewsForAdmin(currentUser(), "invoice"));
     }
 
     private String stringVal(Object value) {

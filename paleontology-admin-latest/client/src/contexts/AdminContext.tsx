@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { toast } from "sonner";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
-import { ensureCmsAuth, listCmsChannelTree } from "@/lib/cms-api";
+import { clearCmsLoginCredentials, clearCmsToken, cmsLogin, CmsAuthError, ensureCmsAuth, fetchCmsUserInfo, listCmsChannelTree } from "@/lib/cms-api";
 import {
   fetchMemberDirectory,
   fetchPendingApplications,
@@ -396,7 +396,7 @@ export interface AuditLogEntry {
 interface AdminContextType {
   adminUser: AdminUser | null;
   isAdminLoggedIn: boolean;
-  adminLogin(email: string, password: string): boolean;
+  adminLogin(email: string, password: string): Promise<boolean>;
   adminLogout(): void;
   adminRole: AdminRole;
   adminBranchId: string | null;
@@ -1898,19 +1898,40 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const triggerRefresh = useCallback(() => setRefreshTrigger(t => t + 1), []);
 
-  // Load persisted admin session
+  // Load persisted admin session — 以 CMS JWT /getInfo 为准
   useEffect(() => {
     const storedEmail = localStorage.getItem("paleo_admin_current_user");
-    if (storedEmail) {
-      const adminDb = JSON.parse(localStorage.getItem("paleo_admin_db") || JSON.stringify(BUILT_IN_ADMINS));
-      const found = adminDb.find((a: AdminUser & { password?: string }) => a.email === storedEmail);
-      if (found) {
-        setAdminUser({ email: found.email, name: found.name, role: found.role, branchId: found.branchId });
-        void ensureCmsAuth().catch(() => {
-          console.warn("CMS 后端未连接，审核队列可能无法加载");
+    if (!storedEmail) return;
+
+    const restoreSession = async () => {
+      try {
+        await ensureCmsAuth();
+        const info = await fetchCmsUserInfo();
+        const role = info.role as AdminRole;
+        const adminDb = JSON.parse(localStorage.getItem("paleo_admin_db") || JSON.stringify(BUILT_IN_ADMINS));
+        const fallback = adminDb.find((a: AdminUser & { password?: string }) => a.email === storedEmail);
+        setAdminUser({
+          email: storedEmail,
+          name: info.displayName || fallback?.name || storedEmail,
+          role,
+          branchId: info.branchId || info.branchCode || fallback?.branchId,
         });
+      } catch (err) {
+        if (err instanceof CmsAuthError) {
+          localStorage.removeItem("paleo_admin_current_user");
+          console.warn("CMS 会话已失效，请重新登录");
+          return;
+        }
+        // CMS 后端不可用：仅 offline fallback，明确提示
+        const adminDb = JSON.parse(localStorage.getItem("paleo_admin_db") || JSON.stringify(BUILT_IN_ADMINS));
+        const found = adminDb.find((a: AdminUser & { password?: string }) => a.email === storedEmail);
+        if (found) {
+          setAdminUser({ email: found.email, name: found.name, role: found.role, branchId: found.branchId });
+          toast.error("无法连接 CMS 后端，当前为离线演示身份，API 审核功能不可用");
+        }
       }
-    }
+    };
+    void restoreSession();
     if (!localStorage.getItem("paleo_admin_db")) {
       localStorage.setItem("paleo_admin_db", JSON.stringify(BUILT_IN_ADMINS));
     }
@@ -1926,29 +1947,49 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // AUTH
   // ==========================================
 
-  const adminLogin = useCallback((email: string, password: string): boolean => {
-    const adminDb = JSON.parse(localStorage.getItem("paleo_admin_db") || JSON.stringify(BUILT_IN_ADMINS));
-    const found = adminDb.find(
-      (a: AdminUser & { password: string }) =>
-        a.email.toLowerCase() === email.toLowerCase() && a.password === password
-    );
-    if (found) {
-      const user: AdminUser = { email: found.email, name: found.name, role: found.role, branchId: found.branchId };
+  const adminLogin = useCallback(async (email: string, password: string): Promise<boolean> => {
+    try {
+      const loginResult = await cmsLogin(email, password);
+      const info = await fetchCmsUserInfo();
+      const role = (info.role || loginResult.role) as AdminRole;
+      const user: AdminUser = {
+        email,
+        name: info.displayName || loginResult.displayName || email,
+        role,
+        branchId: info.branchId || info.branchCode || loginResult.branchCode || loginResult.branchId || undefined,
+      };
       setAdminUser(user);
       localStorage.setItem("paleo_admin_current_user", user.email);
-      void ensureCmsAuth().catch(() => {
-        toast.error("无法连接 CMS 后端，审核功能可能不可用");
-      });
       toast.success(`欢迎回来，${user.name}`);
       return true;
+    } catch (cmsErr) {
+      // CMS 后端不可用时的 offline fallback
+      const adminDb = JSON.parse(localStorage.getItem("paleo_admin_db") || JSON.stringify(BUILT_IN_ADMINS));
+      const found = adminDb.find(
+        (a: AdminUser & { password: string }) =>
+          a.email.toLowerCase() === email.toLowerCase() && a.password === password
+      );
+      if (found) {
+        const user: AdminUser = { email: found.email, name: found.name, role: found.role, branchId: found.branchId };
+        setAdminUser(user);
+        localStorage.setItem("paleo_admin_current_user", user.email);
+        toast.warning("CMS 后端未连接，已使用离线演示身份（API 权限校验不可用）");
+        return true;
+      }
+      if (cmsErr instanceof CmsAuthError) {
+        toast.error("账号或密码错误");
+      } else {
+        toast.error("登录失败：" + (cmsErr instanceof Error ? cmsErr.message : "未知错误"));
+      }
+      return false;
     }
-    toast.error("账号或密码错误");
-    return false;
   }, []);
 
   const adminLogout = useCallback(() => {
     setAdminUser(null);
     localStorage.removeItem("paleo_admin_current_user");
+    clearCmsToken();
+    clearCmsLoginCredentials();
     toast.success("已安全退出");
   }, []);
 

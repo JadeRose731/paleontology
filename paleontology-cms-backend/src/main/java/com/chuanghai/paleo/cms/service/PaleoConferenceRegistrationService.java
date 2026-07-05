@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.chuanghai.paleo.cms.domain.PaleoConference;
 import com.chuanghai.paleo.cms.domain.PaleoConferenceRegistration;
+import com.chuanghai.paleo.cms.security.AdminAccessDeniedException;
+import com.chuanghai.paleo.cms.security.LoginUser;
 import com.chuanghai.paleo.cms.domain.PaleoUser;
 import com.chuanghai.paleo.cms.mapper.PaleoConferenceMapper;
 import com.chuanghai.paleo.cms.mapper.PaleoConferenceRegistrationMapper;
@@ -25,6 +27,9 @@ public class PaleoConferenceRegistrationService extends ServiceImpl<PaleoConfere
 
     @Autowired
     private PaleoUserMapper userMapper;
+
+    @Autowired
+    private AdminScopeService adminScopeService;
 
     public PaleoConference findByCode(String conferenceCode) {
         if (!StringUtils.hasText(conferenceCode)) {
@@ -140,8 +145,48 @@ public class PaleoConferenceRegistrationService extends ServiceImpl<PaleoConfere
         return updateById(reg);
     }
 
-    public List<PaleoConferenceRegistration> listPendingReviews(String phase) {
-        LambdaQueryWrapper<PaleoConferenceRegistration> wrapper = new LambdaQueryWrapper<PaleoConferenceRegistration>()
+    public void assertCanAccessRegistration(LoginUser user, Long registrationId) {
+        PaleoConferenceRegistration reg = getById(registrationId);
+        if (reg == null) {
+            throw new AdminAccessDeniedException("报名记录不存在");
+        }
+        if (user == null) {
+            throw new AdminAccessDeniedException("未登录");
+        }
+        if (adminScopeService.isSiteWideReader(user)) {
+            return;
+        }
+        if (adminScopeService.isBranchAdmin(user)) {
+            Long associationId = reg.getAssociationId();
+            if (associationId == null && reg.getConferenceId() != null) {
+                PaleoConference conference = conferenceMapper.selectById(reg.getConferenceId());
+                if (conference != null) {
+                    associationId = conference.getAssociationId();
+                }
+            }
+            if (!adminScopeService.canAccessAssociationId(user, associationId)) {
+                throw new AdminAccessDeniedException("无权访问该会议报名");
+            }
+            return;
+        }
+        throw new AdminAccessDeniedException("无权访问该会议报名");
+    }
+
+    public LambdaQueryWrapper<PaleoConferenceRegistration> adminScopeWrapper(LoginUser user) {
+        LambdaQueryWrapper<PaleoConferenceRegistration> wrapper = new LambdaQueryWrapper<>();
+        if (user != null && adminScopeService.isBranchAdmin(user)) {
+            List<Long> accessible = adminScopeService.resolveAccessibleAssociationIds(user);
+            if (accessible.isEmpty()) {
+                wrapper.eq(PaleoConferenceRegistration::getRegistrationId, -1L);
+            } else {
+                wrapper.in(PaleoConferenceRegistration::getAssociationId, accessible);
+            }
+        }
+        return wrapper;
+    }
+
+    public List<PaleoConferenceRegistration> listPendingReviewsForAdmin(LoginUser user, String phase) {
+        LambdaQueryWrapper<PaleoConferenceRegistration> wrapper = adminScopeWrapper(user)
                 .orderByAsc(PaleoConferenceRegistration::getVoucherSubmitTime)
                 .orderByAsc(PaleoConferenceRegistration::getInvoiceSubmitTime);
         if ("invoice".equals(phase)) {
@@ -152,6 +197,10 @@ public class PaleoConferenceRegistrationService extends ServiceImpl<PaleoConfere
         List<PaleoConferenceRegistration> list = list(wrapper);
         list.forEach(this::enrichRegistration);
         return list;
+    }
+
+    public List<PaleoConferenceRegistration> listPendingReviews(String phase) {
+        return listPendingReviewsForAdmin(null, phase);
     }
 
     public void enrichRegistration(PaleoConferenceRegistration reg) {

@@ -12,6 +12,7 @@ import com.chuanghai.paleo.cms.mapper.PaleoConferenceMapper;
 import com.chuanghai.paleo.cms.mapper.PaleoConferenceRegistrationMapper;
 import com.chuanghai.paleo.cms.mapper.PaleoMembershipPaymentMapper;
 import com.chuanghai.paleo.cms.mapper.PaleoUserBindingMapper;
+import com.chuanghai.paleo.cms.security.LoginUser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -47,10 +48,17 @@ public class PaleoDashboardService {
     @Autowired
     private PaleoAssociationMapper associationMapper;
 
+    @Autowired
+    private AdminScopeService adminScopeService;
+
     public Map<String, Object> getDashboardStats() {
+        return getDashboardStats(null);
+    }
+
+    public Map<String, Object> getDashboardStats(LoginUser user) {
         Map<String, Object> result = new HashMap<>();
 
-        List<Map<String, Object>> directory = directoryService.listDirectory();
+        List<Map<String, Object>> directory = directoryService.listDirectoryForAdmin(user);
         Set<Long> realUserIds = userService.list(new LambdaQueryWrapper<PaleoUser>()
                         .eq(PaleoUser::getStatus, "1"))
                 .stream()
@@ -103,6 +111,10 @@ public class PaleoDashboardService {
         result.put("studentNonMembers", studentNonMembers);
         result.put("nonStudentNonMembers", nonStudentNonMembers);
 
+        List<Long> scopedAssociationIds = user != null && adminScopeService.isBranchAdmin(user)
+                ? adminScopeService.resolveAccessibleAssociationIds(user)
+                : null;
+
         List<PaleoMembershipPayment> payments = realUserIds.isEmpty()
                 ? new ArrayList<>()
                 : paymentMapper.selectList(new LambdaQueryWrapper<PaleoMembershipPayment>()
@@ -138,6 +150,11 @@ public class PaleoDashboardService {
                 : registrationMapper.selectList(
                 new LambdaQueryWrapper<PaleoConferenceRegistration>()
                         .in(PaleoConferenceRegistration::getUserId, realUserIds));
+        if (scopedAssociationIds != null) {
+            registrations = registrations.stream()
+                    .filter(r -> r.getAssociationId() != null && scopedAssociationIds.contains(r.getAssociationId()))
+                    .collect(Collectors.toList());
+        }
         BigDecimal totalConferenceFee = registrations.stream()
                 .filter(r -> "CONFIRMED".equals(r.getPaymentStatus()))
                 .map(r -> r.getFeeAmount() == null ? BigDecimal.ZERO : r.getFeeAmount())
@@ -146,11 +163,22 @@ public class PaleoDashboardService {
 
         List<PaleoAssociation> associations = associationMapper.selectList(
                 new LambdaQueryWrapper<PaleoAssociation>().orderByAsc(PaleoAssociation::getSortOrder));
+        if (scopedAssociationIds != null) {
+            associations = associations.stream()
+                    .filter(a -> scopedAssociationIds.contains(a.getAssociationId()))
+                    .collect(Collectors.toList());
+        }
         List<PaleoUserBinding> bindings = realUserIds.isEmpty()
                 ? new ArrayList<>()
                 : userBindingMapper.selectList(new LambdaQueryWrapper<PaleoUserBinding>()
                 .in(PaleoUserBinding::getUserId, realUserIds)
                 .eq(PaleoUserBinding::getBindingStatus, "BOUND"));
+
+        if (scopedAssociationIds != null) {
+            bindings = bindings.stream()
+                    .filter(b -> scopedAssociationIds.contains(b.getAssociationId()))
+                    .collect(Collectors.toList());
+        }
 
         List<Map<String, Object>> branchMemberCounts = new ArrayList<>();
         for (PaleoAssociation assoc : associations) {

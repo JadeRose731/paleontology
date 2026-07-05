@@ -8,6 +8,7 @@ import com.chuanghai.paleo.cms.domain.PaleoMembershipPayment;
 import com.chuanghai.paleo.cms.domain.PaleoUser;
 import com.chuanghai.paleo.cms.domain.PaleoUserBinding;
 import com.chuanghai.paleo.cms.mapper.PaleoAssociationMapper;
+import com.chuanghai.paleo.cms.security.LoginUser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -39,7 +40,14 @@ public class PaleoMembershipDirectoryService {
     @Autowired
     private com.chuanghai.paleo.cms.mapper.PaleoUserBindingMapper userBindingMapper;
 
+    @Autowired
+    private AdminScopeService adminScopeService;
+
     public List<Map<String, Object>> listDirectory() {
+        return listDirectoryForAdmin(null);
+    }
+
+    public List<Map<String, Object>> listDirectoryForAdmin(LoginUser user) {
         List<PaleoUser> users = userService.list(new LambdaQueryWrapper<PaleoUser>()
                 .eq(PaleoUser::getStatus, "1")
                 .orderByDesc(PaleoUser::getCreateTime));
@@ -98,27 +106,45 @@ public class PaleoMembershipDirectoryService {
 
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd");
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (PaleoUser user : users) {
-            PaleoMemberProfile profile = profileMap.get(user.getUserId());
+        List<Long> scopeAssociationIds = user != null && adminScopeService.isBranchAdmin(user)
+                ? adminScopeService.resolveAccessibleAssociationIds(user)
+                : null;
+
+        for (PaleoUser userRow : users) {
+            if (scopeAssociationIds != null) {
+                List<String> userBranches = branchCodeMap.getOrDefault(userRow.getUserId(), new ArrayList<>());
+                boolean inScope = false;
+                for (Long assocId : scopeAssociationIds) {
+                    String code = assocBranchCodes.get(assocId);
+                    if (code != null && userBranches.contains(code)) {
+                        inScope = true;
+                        break;
+                    }
+                }
+                if (!inScope) {
+                    continue;
+                }
+            }
+            PaleoMemberProfile profile = profileMap.get(userRow.getUserId());
             PaleoMembershipPayment latestPayment = latestPaymentMap.get(user.getUserId());
             PaleoMembershipApplication pendingJoin = pendingJoinMap.get(user.getUserId());
 
             Map<String, Object> row = new HashMap<>();
-            row.put("userId", user.getUserId());
-            row.put("email", user.getEmail());
-            row.put("userName", user.getUserName());
-            row.put("gender", user.getGender());
-            row.put("unit", user.getUnit());
-            row.put("roleLabel", user.getRoleLabel());
-            row.put("userType", user.getUserType());
+            row.put("userId", userRow.getUserId());
+            row.put("email", userRow.getEmail());
+            row.put("userName", userRow.getUserName());
+            row.put("gender", userRow.getGender());
+            row.put("unit", userRow.getUnit());
+            row.put("roleLabel", userRow.getRoleLabel());
+            row.put("userType", userRow.getUserType());
             row.put("memberStatus", profile != null ? profile.getMemberStatus() : "NON_MEMBER");
             row.put("memberCategory", profile != null ? profile.getMemberCategory() : null);
             row.put("membershipStatus", resolveMembershipStatus(profile, latestPayment, pendingJoin));
             if (profile != null && profile.getValidEndDate() != null) {
                 row.put("validEndDate", dateFormat.format(profile.getValidEndDate()));
             }
-            row.put("boundBranches", branchCodeMap.getOrDefault(user.getUserId(), new ArrayList<>()));
-            row.put("boundBranchNames", branchNameMap.getOrDefault(user.getUserId(), new ArrayList<>()));
+            row.put("boundBranches", branchCodeMap.getOrDefault(userRow.getUserId(), new ArrayList<>()));
+            row.put("boundBranchNames", branchNameMap.getOrDefault(userRow.getUserId(), new ArrayList<>()));
             rows.add(row);
         }
         return rows;

@@ -41,6 +41,10 @@ public class AjaxResult extends HashMap<String, Object> {
         return new AjaxResult(ERROR, msg);
     }
 
+    public static AjaxResult error(int code, String msg) {
+        return new AjaxResult(code, msg);
+    }
+
     public AjaxResult put(String key, Object value) {
         super.put(key, value);
         return this;

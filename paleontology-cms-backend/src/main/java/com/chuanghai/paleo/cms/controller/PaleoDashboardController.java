@@ -1,6 +1,8 @@
 package com.chuanghai.paleo.cms.controller;
 
 import com.chuanghai.paleo.cms.common.AjaxResult;
+import com.chuanghai.paleo.cms.common.BaseController;
+import com.chuanghai.paleo.cms.security.LoginUser;
 import com.chuanghai.paleo.cms.service.PaleoDashboardService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -12,7 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Api(tags = "仪表盘统计")
 @RestController
 @RequestMapping("/paleo/dashboard")
-public class PaleoDashboardController {
+public class PaleoDashboardController extends BaseController {
 
     @Autowired
     private PaleoDashboardService dashboardService;
@@ -20,6 +22,7 @@ public class PaleoDashboardController {
     @ApiOperation("仪表盘综合统计")
     @GetMapping("/stats")
     public AjaxResult stats() {
-        return AjaxResult.success(dashboardService.getDashboardStats());
+        LoginUser user = currentUser();
+        return AjaxResult.success(dashboardService.getDashboardStats(user));
     }
 }

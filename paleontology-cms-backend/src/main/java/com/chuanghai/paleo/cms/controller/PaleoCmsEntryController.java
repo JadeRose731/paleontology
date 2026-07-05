@@ -8,7 +8,7 @@ import com.chuanghai.paleo.cms.common.TableDataInfo;
 import com.chuanghai.paleo.cms.domain.PaleoCmsEntry;
 import com.chuanghai.paleo.cms.security.Anonymous;
 import com.chuanghai.paleo.cms.security.LoginUser;
-import com.chuanghai.paleo.cms.service.CmsScopeService;
+import com.chuanghai.paleo.cms.service.AdminScopeService;
 import com.chuanghai.paleo.cms.service.LocalFileStorageService;
 import com.chuanghai.paleo.cms.service.PaleoCmsEntryService;
 import io.swagger.annotations.Api;
@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 
 @Api(tags = "完整CMS内容")
@@ -31,7 +32,7 @@ public class PaleoCmsEntryController extends BaseController {
     private PaleoCmsEntryService cmsEntryService;
 
     @Autowired
-    private CmsScopeService scopeService;
+    private AdminScopeService adminScopeService;
 
     @Autowired
     private LocalFileStorageService fileStorageService;
@@ -42,17 +43,21 @@ public class PaleoCmsEntryController extends BaseController {
                               @RequestParam(defaultValue = "1") int pageNum,
                               @RequestParam(defaultValue = "20") int pageSize) {
         LoginUser user = currentUser();
-        if (user != null && "branch_admin".equals(user.getRole())) {
-            if (!StringUtils.hasText(user.getBranchId())) {
-                return getDataTable(Collections.emptyList());
-            }
-            query.setAssociationId(Long.parseLong(user.getBranchId()));
-        }
-        Page<PaleoCmsEntry> page = cmsEntryService.page(new Page<>(pageNum, pageSize), baseQuery(query)
+        LambdaQueryWrapper<PaleoCmsEntry> wrapper = baseQuery(query)
                 .orderByDesc(PaleoCmsEntry::getPinned)
                 .orderByAsc(PaleoCmsEntry::getSortOrder)
                 .orderByDesc(PaleoCmsEntry::getPublishTime)
-                .orderByDesc(PaleoCmsEntry::getCreateTime));
+                .orderByDesc(PaleoCmsEntry::getCreateTime);
+
+        if (user != null && adminScopeService.isBranchAdmin(user)) {
+            List<Long> accessible = adminScopeService.resolveAccessibleAssociationIds(user);
+            if (accessible.isEmpty()) {
+                return getDataTable(Collections.emptyList());
+            }
+            wrapper.in(PaleoCmsEntry::getAssociationId, accessible);
+        }
+
+        Page<PaleoCmsEntry> page = cmsEntryService.page(new Page<>(pageNum, pageSize), wrapper);
         return getDataTable(page);
     }
 
@@ -61,7 +66,8 @@ public class PaleoCmsEntryController extends BaseController {
     public AjaxResult info(@PathVariable Long entryId) {
         PaleoCmsEntry entry = cmsEntryService.getById(entryId);
         LoginUser user = currentUser();
-        if (entry == null || "1".equals(entry.getDeleted()) || !scopeService.canAccessAssociation(user, entry.getAssociationId())) {
+        if (entry == null || "1".equals(entry.getDeleted())
+                || !adminScopeService.canAccessAssociation(user, entry.getAssociationId())) {
             return error("无权查看该内容");
         }
         return success(entry);
@@ -93,8 +99,13 @@ public class PaleoCmsEntryController extends BaseController {
     @PostMapping
     public AjaxResult add(@RequestBody PaleoCmsEntry entry) {
         LoginUser user = currentUser();
-        if (!scopeService.canAccessAssociation(user, entry.getAssociationId())) {
-            return error("无权新增该学会/分会内容");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (!adminScopeService.canAccessAssociation(user, entry.getAssociationId())) {
+                return error("无权新增该学会/分会内容");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         normalizeEntry(entry, true);
         entry.setCreateBy(getUsername());
@@ -106,11 +117,16 @@ public class PaleoCmsEntryController extends BaseController {
     @PutMapping
     public AjaxResult edit(@RequestBody PaleoCmsEntry entry) {
         LoginUser user = currentUser();
-        PaleoCmsEntry old = cmsEntryService.getById(entry.getEntryId());
-        if (old == null || "1".equals(old.getDeleted())
-                || !scopeService.canAccessAssociation(user, old.getAssociationId())
-                || !scopeService.canAccessAssociation(user, entry.getAssociationId())) {
-            return error("无权修改该内容");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            PaleoCmsEntry old = cmsEntryService.getById(entry.getEntryId());
+            if (old == null || "1".equals(old.getDeleted())
+                    || !adminScopeService.canAccessAssociation(user, old.getAssociationId())
+                    || !adminScopeService.canAccessAssociation(user, entry.getAssociationId())) {
+                return error("无权修改该内容");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         entry.setUpdateBy(getUsername());
         return toAjax(cmsEntryService.updateById(entry));
@@ -123,8 +139,13 @@ public class PaleoCmsEntryController extends BaseController {
                                   @RequestParam(required = false) Long associationId,
                                   @RequestParam("file") MultipartFile file) {
         LoginUser user = currentUser();
-        if (!scopeService.canAccessAssociation(user, associationId)) {
-            return error("无权上传该学会/分会媒体");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (!adminScopeService.canAccessAssociation(user, associationId)) {
+                return error("无权上传该学会/分会媒体");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         try {
             LocalFileStorageService.StoredFile stored = fileStorageService.store(file);
@@ -163,8 +184,14 @@ public class PaleoCmsEntryController extends BaseController {
     public AjaxResult updateStatus(@PathVariable Long entryId, @RequestBody Map<String, String> body) {
         LoginUser user = currentUser();
         PaleoCmsEntry entry = cmsEntryService.getById(entryId);
-        if (entry == null || "1".equals(entry.getDeleted()) || !scopeService.canAccessAssociation(user, entry.getAssociationId())) {
-            return error("无权修改该内容状态");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (entry == null || "1".equals(entry.getDeleted())
+                    || !adminScopeService.canAccessAssociation(user, entry.getAssociationId())) {
+                return error("无权修改该内容状态");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         String status = body == null ? null : body.get("status");
         if (!"DRAFT".equals(status) && !"PUBLISHED".equals(status) && !"ARCHIVED".equals(status)) {
@@ -180,8 +207,14 @@ public class PaleoCmsEntryController extends BaseController {
     public AjaxResult delete(@PathVariable Long entryId) {
         LoginUser user = currentUser();
         PaleoCmsEntry entry = cmsEntryService.getById(entryId);
-        if (entry == null || "1".equals(entry.getDeleted()) || !scopeService.canAccessAssociation(user, entry.getAssociationId())) {
-            return error("无权删除该内容");
+        try {
+            adminScopeService.assertCanWriteCms(user);
+            if (entry == null || "1".equals(entry.getDeleted())
+                    || !adminScopeService.canAccessAssociation(user, entry.getAssociationId())) {
+                return error("无权删除该内容");
+            }
+        } catch (Exception ex) {
+            return error(ex.getMessage());
         }
         if ("media".equals(entry.getModuleCode()) && entry.getRefCount() != null && entry.getRefCount() > 0) {
             return error("该媒体已被引用，不能删除");

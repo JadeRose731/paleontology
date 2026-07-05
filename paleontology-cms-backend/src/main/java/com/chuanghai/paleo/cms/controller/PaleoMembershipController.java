@@ -15,9 +15,12 @@ import com.chuanghai.paleo.cms.service.PaleoMembershipApplicationService;
 import com.chuanghai.paleo.cms.service.PaleoMembershipDirectoryService;
 import com.chuanghai.paleo.cms.service.PaleoMembershipPaymentService;
 import com.chuanghai.paleo.cms.domain.PaleoMembershipTemplate;
-import com.chuanghai.paleo.cms.security.Anonymous;
+import com.chuanghai.paleo.cms.security.LoginUser;
+import com.chuanghai.paleo.cms.security.RequireAdminRole;
+import com.chuanghai.paleo.cms.service.AdminScopeService;
 import com.chuanghai.paleo.cms.service.PaleoMembershipTemplateService;
 import com.chuanghai.paleo.cms.service.PaleoUserService;
+import com.chuanghai.paleo.cms.security.Anonymous;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,6 +60,9 @@ public class PaleoMembershipController extends BaseController {
     @Autowired
     private PaleoMembershipTemplateService templateService;
 
+    @Autowired
+    private AdminScopeService adminScopeService;
+
     @Anonymous
     @ApiOperation("公开-入会/退会申请书模板")
     @GetMapping("/templates/public")
@@ -89,12 +95,14 @@ public class PaleoMembershipController extends BaseController {
         }
     }
 
+    @RequireAdminRole({"super_admin", "branch_admin", "finance_reviewer"})
     @ApiOperation("管理端-用户会员目录")
     @GetMapping("/admin/directory")
     public AjaxResult memberDirectory() {
-        return success(directoryService.listDirectory());
+        return success(directoryService.listDirectoryForAdmin(currentUser()));
     }
 
+    @RequireAdminRole({"super_admin", "finance_reviewer"})
     @ApiOperation("管理端-指定用户的会员费记录")
     @GetMapping("/admin/users/{userId}/payments")
     public AjaxResult userMembershipPayments(@PathVariable Long userId) {
@@ -137,6 +145,7 @@ public class PaleoMembershipController extends BaseController {
         return toAjax(memberProfileService.updateMineCategory(userId, profile.getMemberCategory(), getUsername()));
     }
 
+    @RequireAdminRole("super_admin")
     @ApiOperation("管理端-入会/退会申请列表")
     @GetMapping("/applications/list")
     public TableDataInfo applicationList(PaleoMembershipApplication query,
@@ -190,6 +199,7 @@ public class PaleoMembershipController extends BaseController {
         }
     }
 
+    @RequireAdminRole("super_admin")
     @ApiOperation("管理端-审核入会/退会申请")
     @PostMapping("/applications/{applicationId}/review")
     public AjaxResult reviewApplication(@PathVariable Long applicationId, @RequestBody Map<String, String> body) {
@@ -233,12 +243,14 @@ public class PaleoMembershipController extends BaseController {
         }
     }
 
+    @RequireAdminRole("super_admin")
     @ApiOperation("管理端-待审入会/退会申请")
     @GetMapping("/applications/reviews/pending")
     public AjaxResult pendingApplications(@RequestParam(required = false) String applicationType) {
         return success(enrichApplications(applicationService.listPending(applicationType)));
     }
 
+    @RequireAdminRole({"super_admin", "finance_reviewer"})
     @ApiOperation("管理端-会员费列表")
     @GetMapping("/payments/list")
     public TableDataInfo paymentList(PaleoMembershipPayment query,
@@ -281,6 +293,7 @@ public class PaleoMembershipController extends BaseController {
         return success(paymentService.getOrCreateDraft(payment, getUsername()));
     }
 
+    @RequireAdminRole({"super_admin", "finance_reviewer"})
     @ApiOperation("管理端-审核会员费")
     @PostMapping("/payments/{paymentId}/review")
     public AjaxResult reviewPayment(@PathVariable Long paymentId, @RequestBody Map<String, String> body) {
@@ -320,12 +333,14 @@ public class PaleoMembershipController extends BaseController {
         return success(paymentService.getMembershipPaymentStats());
     }
 
+    @RequireAdminRole({"super_admin", "finance_reviewer"})
     @ApiOperation("管理端-待审凭证（会员费）")
     @GetMapping("/payments/reviews/pending-vouchers")
     public AjaxResult pendingMembershipVoucherReviews() {
         return success(enrichPayments(paymentService.listPendingReviews("voucher")));
     }
 
+    @RequireAdminRole({"super_admin", "finance_reviewer"})
     @ApiOperation("管理端-待审发票（会员费）")
     @GetMapping("/payments/reviews/pending-invoices")
     public AjaxResult pendingMembershipInvoiceReviews() {

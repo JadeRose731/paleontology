@@ -1,24 +1,20 @@
 package com.chuanghai.paleo.cms.service;
 
 import com.chuanghai.paleo.cms.security.LoginUser;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+/**
+ * @deprecated 请使用 {@link AdminScopeService}
+ */
 @Service
+@Deprecated
 public class CmsScopeService {
 
+    @Autowired
+    private AdminScopeService adminScopeService;
+
     public boolean canAccessAssociation(LoginUser user, Long associationId) {
-        if (user == null) {
-            return false;
-        }
-        if ("admin".equals(user.getRole())) {
-            return true;
-        }
-        if ("branch_admin".equals(user.getRole())) {
-            if (associationId == null) {
-                return false;
-            }
-            return String.valueOf(associationId).equals(user.getBranchId());
-        }
-        return true;
+        return adminScopeService.canAccessAssociation(user, associationId);
     }
 }

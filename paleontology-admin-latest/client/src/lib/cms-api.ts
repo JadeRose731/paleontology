@@ -4,6 +4,25 @@
  */
 
 const CMS_TOKEN_KEY = "paleo_cms_token";
+const CMS_LOGIN_EMAIL_KEY = "paleo_cms_login_email";
+const CMS_LOGIN_PASSWORD_KEY = "paleo_cms_login_password";
+
+export interface CmsLoginResult {
+  token: string;
+  role: string;
+  branchCode?: string | null;
+  branchId?: string | null;
+  displayName?: string;
+  email?: string;
+}
+
+export interface CmsUserInfo {
+  username: string;
+  displayName?: string;
+  role: string;
+  branchId?: string | null;
+  branchCode?: string | null;
+}
 
 export interface ApiCmsEntry {
   entryId?: number;
@@ -79,6 +98,14 @@ interface ApiResponse<T = unknown> {
   total?: number;
 }
 
+export class CmsAuthError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 function getToken(): string | null {
   return localStorage.getItem(CMS_TOKEN_KEY);
 }
@@ -91,7 +118,33 @@ export function clearCmsToken() {
   localStorage.removeItem(CMS_TOKEN_KEY);
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+export function setCmsLoginCredentials(email: string, password: string) {
+  localStorage.setItem(CMS_LOGIN_EMAIL_KEY, email);
+  sessionStorage.setItem(CMS_LOGIN_PASSWORD_KEY, password);
+}
+
+export function clearCmsLoginCredentials() {
+  localStorage.removeItem(CMS_LOGIN_EMAIL_KEY);
+  sessionStorage.removeItem(CMS_LOGIN_PASSWORD_KEY);
+}
+
+function getStoredLoginCredentials(): { email: string; password: string } | null {
+  const email = localStorage.getItem(CMS_LOGIN_EMAIL_KEY) || localStorage.getItem("paleo_admin_current_user");
+  const password = sessionStorage.getItem(CMS_LOGIN_PASSWORD_KEY);
+  if (email && password) {
+    return { email, password };
+  }
+  return null;
+}
+
+export function handleCmsUnauthorized(): void {
+  clearCmsToken();
+  if (typeof window !== "undefined" && !window.location.hash.includes("/admin/login")) {
+    window.location.hash = "#/admin/login";
+  }
+}
+
+async function request<T>(path: string, options: RequestInit = {}, retryOn401 = true): Promise<T> {
   const headers: Record<string, string> = { ...(options.headers as Record<string, string>) };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -100,28 +153,65 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   const res = await fetch(path, { ...options, headers });
   const json = (await res.json()) as ApiResponse<T>;
+
+  if (res.status === 401 || json.code === 401) {
+    clearCmsToken();
+    if (retryOn401) {
+      const creds = getStoredLoginCredentials();
+      if (creds) {
+        try {
+          await cmsLogin(creds.email, creds.password);
+          return request<T>(path, options, false);
+        } catch {
+          handleCmsUnauthorized();
+        }
+      } else {
+        handleCmsUnauthorized();
+      }
+    }
+    throw new CmsAuthError(json.msg || "未登录或 token 已过期", 401);
+  }
+
   if (!res.ok || (json.code && json.code !== 200)) {
     throw new Error(json.msg || `请求失败 ${res.status}`);
   }
   return json as T;
 }
 
-/** CMS 后端登录（admin / admin123） */
-export async function cmsLogin(username: string, password: string): Promise<string> {
-  const json = await request<ApiResponse<{ token: string }>>("/login", {
-    method: "POST",
-    body: JSON.stringify({ username, password }),
-  });
-  const token = (json as ApiResponse<{ token: string }>).data?.token;
-  if (!token) throw new Error("登录失败：未返回 token");
-  setCmsToken(token);
-  return token;
+/** CMS 后端登录（支持邮箱） */
+export async function cmsLogin(emailOrUsername: string, password: string): Promise<CmsLoginResult> {
+  const json = await request<ApiResponse<CmsLoginResult>>(
+    "/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ email: emailOrUsername, username: emailOrUsername, password }),
+    },
+    false
+  );
+  const data = (json as ApiResponse<CmsLoginResult>).data;
+  if (!data?.token) throw new Error("登录失败：未返回 token");
+  setCmsToken(data.token);
+  setCmsLoginCredentials(emailOrUsername, password);
+  return data;
 }
 
-/** 确保已登录（开发环境自动 admin 登录） */
+/** 获取当前 JWT 用户信息 */
+export async function fetchCmsUserInfo(): Promise<CmsUserInfo> {
+  const json = await request<ApiResponse<CmsUserInfo>>("/getInfo");
+  const data = (json as ApiResponse<CmsUserInfo>).data;
+  if (!data) throw new Error("无法获取用户信息");
+  return data;
+}
+
+/** 确保已登录：复用有效 token，失效时用当前管理员邮箱重新登录 */
 export async function ensureCmsAuth(): Promise<void> {
   if (getToken()) return;
-  await cmsLogin("admin", "admin123");
+  const creds = getStoredLoginCredentials();
+  if (creds) {
+    await cmsLogin(creds.email, creds.password);
+    return;
+  }
+  throw new CmsAuthError("CMS 未登录，请先登录管理后台", 401);
 }
 
 /** 管理端：按模块拉取条目 */
@@ -246,6 +336,10 @@ export async function upsertCmsEntry(entry: ApiCmsEntry): Promise<ApiCmsEntry> {
     body: JSON.stringify(entry),
   });
   const json = (await res.json()) as ApiResponse<ApiCmsEntry>;
+  if (res.status === 401 || json.code === 401) {
+    handleCmsUnauthorized();
+    throw new CmsAuthError(json.msg || "未登录", 401);
+  }
   if (!res.ok || json.code !== 200) throw new Error(json.msg || "保存失败");
   if (json.data?.entryId) entry.entryId = json.data.entryId;
   return entry;
@@ -277,6 +371,10 @@ export async function uploadCmsMedia(file: File, title?: string, category?: stri
     body: form,
   });
   const json = (await res.json()) as ApiResponse<ApiCmsEntry>;
+  if (res.status === 401 || json.code === 401) {
+    handleCmsUnauthorized();
+    throw new CmsAuthError(json.msg || "未登录", 401);
+  }
   if (!res.ok || json.code !== 200) throw new Error(json.msg || "上传失败");
   return json.data as ApiCmsEntry;
 }
@@ -334,11 +432,16 @@ export interface ApiDashboardStats {
 
 export async function fetchDashboardStats(): Promise<ApiDashboardStats | null> {
   try {
+    await ensureCmsAuth();
     const res = await fetch("/paleo/dashboard/stats", {
       headers: {
         Authorization: `Bearer ${getToken() || ""}`,
       },
     });
+    if (res.status === 401) {
+      handleCmsUnauthorized();
+      return null;
+    }
     if (!res.ok) return null;
     const json = await res.json();
     if (json.code !== 200) return null;

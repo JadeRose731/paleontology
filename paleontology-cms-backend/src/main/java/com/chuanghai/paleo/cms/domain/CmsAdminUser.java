@@ -14,6 +14,8 @@ public class CmsAdminUser {
     @TableId(type = IdType.AUTO)
     private Long userId;
     private String username;
+    /** 登录邮箱，与前端管理端一致 */
+    private String email;
     private String passwordHash;
     private String displayName;
     private String role;

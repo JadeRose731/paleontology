@@ -30,25 +30,34 @@ public class AuthController {
     private JwtTokenUtil jwtTokenUtil;
 
     @Anonymous
-    @ApiOperation("管理员登录")
+    @ApiOperation("管理员登录（支持 username 或 email）")
     @PostMapping("/login")
     public AjaxResult login(@RequestBody Map<String, String> body) {
-        String username = body.get("username");
+        String loginId = firstNonBlank(body.get("username"), body.get("email"));
         String password = body.get("password");
-        if (!StringUtils.hasText(username) || !StringUtils.hasText(password)) {
+        if (!StringUtils.hasText(loginId) || !StringUtils.hasText(password)) {
             return AjaxResult.error("用户名和密码不能为空");
         }
-        CmsAdminUser user = adminUserService.findByUsername(username);
+        CmsAdminUser user = adminUserService.findByLoginId(loginId);
         if (user == null || !passwordEncoder.matches(password, user.getPasswordHash())) {
             return AjaxResult.error("用户名或密码错误");
         }
-        LoginUser loginUser = new LoginUser(user.getUserId(), user.getUsername(), user.getDisplayName(), user.getRole(), user.getBranchId());
+        String branchCode = user.getBranchId();
+        LoginUser loginUser = new LoginUser(
+                user.getUserId(),
+                user.getUsername(),
+                user.getDisplayName(),
+                user.getRole(),
+                branchCode);
         String token = jwtTokenUtil.createToken(loginUser);
         Map<String, Object> data = new HashMap<>();
         data.put("token", token);
         data.put("username", user.getUsername());
+        data.put("email", user.getEmail() != null ? user.getEmail() : user.getUsername());
         data.put("displayName", user.getDisplayName());
         data.put("role", user.getRole());
+        data.put("branchCode", branchCode);
+        data.put("branchId", branchCode);
         return AjaxResult.success(data);
     }
 
@@ -58,7 +67,7 @@ public class AuthController {
         org.springframework.security.core.Authentication auth =
                 org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !(auth.getPrincipal() instanceof LoginUser)) {
-            return AjaxResult.error("未登录");
+            return AjaxResult.error(401, "未登录");
         }
         LoginUser user = (LoginUser) auth.getPrincipal();
         Map<String, Object> data = new HashMap<>();
@@ -66,6 +75,19 @@ public class AuthController {
         data.put("displayName", user.getDisplayName());
         data.put("role", user.getRole());
         data.put("branchId", user.getBranchId());
+        data.put("branchCode", user.getBranchId());
         return AjaxResult.success(data);
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String v : values) {
+            if (StringUtils.hasText(v)) {
+                return v.trim();
+            }
+        }
+        return null;
     }
 }

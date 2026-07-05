@@ -143,15 +143,19 @@ pnpm build:singlefile
 
 ### 认证与权限
 
-系统内置三种角色，共 13 个演示账号（业务登录，存于 `localStorage`）：
+登录与角色以 **CMS 后端 JWT** 为准（`paleontology-cms-backend`），不再写死 `admin/admin123`。
+
+系统内置三种角色，共 13 个演示账号（密码统一 `admin123`，由 Flyway V23 + `AdminUserInitializer` 种子）：
 
 | 角色 | 权限范围 | 演示账号 |
 |------|----------|----------|
-| **学会总管理员** (super_admin) | 全部功能 + 全部 CMS 模块 | `admin@paleo.cn` |
-| **分会管理员** (branch_admin) | 本分会会议、统计、分会 CMS | 11 个分会各一个账号 |
-| **财务审核员** (finance_reviewer) | 审核、财务记录 | `finance@paleo.cn` |
+| **学会总管理员** (super_admin) | 全部功能 + 全部 CMS 模块 | `admin@paleontology.org.cn` |
+| **分会管理员** (branch_admin) | 本分会会议、统计、分会 CMS | 11 个分会各一个账号，如 `branch_gjzdw@paleo.org.cn` |
+| **财务审核员** (finance_reviewer) | 审核、财务记录、统计 | `finance@paleontology.org.cn` |
 
-> 所有演示账号密码均为 `123456`。登录成功后自动尝试 CMS JWT 登录（`admin` / `admin123`）；后端未启动时不阻断业务登录。
+> 登录流程：`adminLogin` → `POST /login`（邮箱+密码）→ JWT 写入 `paleo_cms_token`；会话恢复调用 `/getInfo` 获取真实 `role` / `branchId`。  
+> CMS API 返回 401 时自动清 token 并跳转 `/admin/login`。  
+> 后端未启动时仅允许 `BUILT_IN_ADMINS` 离线 fallback，并明确提示 API 不可用。
 
 ### 业务页面
 

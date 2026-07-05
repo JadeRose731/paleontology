@@ -39,14 +39,8 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginFormData) => {
     setLoading(true);
-    const success = adminLogin(data.email, data.password);
+    const success = await adminLogin(data.email, data.password);
     if (success) {
-      try {
-        const { cmsLogin } = await import("@/lib/cms-api");
-        await cmsLogin("admin", "admin123");
-      } catch {
-        /* CMS 后端未启动时不阻断管理端登录 */
-      }
       setLocation("/admin/dashboard");
     }
     setLoading(false);
