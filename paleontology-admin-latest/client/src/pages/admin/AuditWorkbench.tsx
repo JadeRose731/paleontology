@@ -450,6 +450,7 @@ function VoucherTab() {
 
 function InvoiceTab() {
   const {
+    adminRole,
     pendingInvoiceReviews,
     approveInvoice,
     rejectInvoice,
@@ -589,7 +590,7 @@ function InvoiceTab() {
             onPreview={handlePreview}
             onApprove={handleApprove}
             onReject={(item) => setRejectItem(item)}
-            onExtend={(item) => setExtendItem(item)}
+            onExtend={adminRole === "super_admin" ? (item) => setExtendItem(item) : undefined}
           />
         </CardContent>
       </Card>
@@ -886,18 +887,30 @@ function WithdrawalAppTab() {
 }
 
 export default function AuditWorkbench() {
+  const { adminRole } = useAdmin();
+  const showMembershipTabs = adminRole === "super_admin";
+  const tabCount = showMembershipTabs ? 4 : 2;
+
   return (
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-strata-blue-deep">审核工作台</h1>
-        <p className="text-muted-foreground mt-1">管理会员费和会议费的凭证初审与发票终审，以及入会/退会申请审核</p>
+        <p className="text-muted-foreground mt-1">
+          {showMembershipTabs
+            ? "管理会员费和会议费的凭证初审与发票终审，以及入会/退会申请审核"
+            : "管理会员费和会议费的凭证初审与发票终审"}
+        </p>
       </div>
       <Tabs defaultValue="voucher" className="w-full">
-        <TabsList className="grid w-full max-w-2xl grid-cols-4">
+        <TabsList className="grid w-full max-w-2xl" style={{ gridTemplateColumns: `repeat(${tabCount}, minmax(0, 1fr))` }}>
           <TabsTrigger value="voucher">凭证初审</TabsTrigger>
           <TabsTrigger value="invoice">发票终审</TabsTrigger>
-          <TabsTrigger value="membership-app">入会申请</TabsTrigger>
-          <TabsTrigger value="withdrawal-app">退会申请</TabsTrigger>
+          {showMembershipTabs && (
+            <>
+              <TabsTrigger value="membership-app">入会申请</TabsTrigger>
+              <TabsTrigger value="withdrawal-app">退会申请</TabsTrigger>
+            </>
+          )}
         </TabsList>
         <TabsContent value="voucher" className="mt-4">
           <VoucherTab />
@@ -905,12 +918,16 @@ export default function AuditWorkbench() {
         <TabsContent value="invoice" className="mt-4">
           <InvoiceTab />
         </TabsContent>
-        <TabsContent value="membership-app" className="mt-4">
-          <MembershipAppTab />
-        </TabsContent>
-        <TabsContent value="withdrawal-app" className="mt-4">
-          <WithdrawalAppTab />
-        </TabsContent>
+        {showMembershipTabs && (
+          <>
+            <TabsContent value="membership-app" className="mt-4">
+              <MembershipAppTab />
+            </TabsContent>
+            <TabsContent value="withdrawal-app" className="mt-4">
+              <WithdrawalAppTab />
+            </TabsContent>
+          </>
+        )}
       </Tabs>
     </div>
   );

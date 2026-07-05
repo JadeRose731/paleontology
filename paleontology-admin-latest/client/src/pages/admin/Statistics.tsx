@@ -1572,14 +1572,18 @@ export default function Statistics() {
   const { adminRole, getGlobalStats } = useAdmin();
   const [level, setLevel] = useState<StatLevel>(adminRole === "branch_admin" ? "society" : "global");
 
-  if (adminRole === "super_admin") {
+  if (adminRole === "super_admin" || adminRole === "finance_reviewer") {
     const globalStats = getGlobalStats();
 
     return (
       <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-bold text-strata-blue-deep">数据统计</h1>
-          <p className="text-muted-foreground mt-1">学会运营数据的可视化统计与分析</p>
+          <p className="text-muted-foreground mt-1">
+            {adminRole === "finance_reviewer"
+              ? "全平台运营数据汇总（财务视角）"
+              : "学会运营数据的可视化统计与分析"}
+          </p>
         </div>
 
         {/* Level selector */}

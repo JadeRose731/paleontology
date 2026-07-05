@@ -232,3 +232,63 @@ export async function uploadMembershipTemplate(templateType: "JOIN" | "WITHDRAW"
   }
   return json.data;
 }
+
+export interface ApiAdminAssociationMine {
+  branchCodes: string[];
+  associationIds: number[];
+  associationNames: string[];
+}
+
+export interface ApiAdminBindingRow {
+  bindingId: number;
+  adminUserId: number;
+  associationId: number;
+  bindingStatus: string;
+  adminEmail?: string;
+  adminName?: string;
+  adminRole?: string;
+  branchCode?: string;
+  associationName?: string;
+}
+
+export interface ApiAdminAccountRow {
+  userId: number;
+  username?: string;
+  email?: string;
+  displayName?: string;
+  role?: string;
+  branchId?: string;
+}
+
+export async function fetchAdminAssociationMine() {
+  return request<ApiAdminAssociationMine>("/paleo/admin/associations/mine");
+}
+
+export async function fetchAdminAssociationBindings() {
+  return request<ApiAdminBindingRow[]>("/paleo/admin/associations/bindings");
+}
+
+export async function fetchAdminAccounts() {
+  return request<ApiAdminAccountRow[]>("/paleo/admin/associations/admins");
+}
+
+export async function bindAdminAssociation(adminUserId: number, associationId: number) {
+  return request<unknown>("/paleo/admin/associations/bindings", {
+    method: "POST",
+    body: JSON.stringify({ adminUserId, associationId }),
+  });
+}
+
+export async function unbindAdminAssociation(adminUserId: number, associationId: number) {
+  return request<unknown>("/paleo/admin/associations/bindings/unbind", {
+    method: "POST",
+    body: JSON.stringify({ adminUserId, associationId }),
+  });
+}
+
+export async function replaceAdminAssociationBindings(adminUserId: number, associationIds: number[]) {
+  return request<unknown>("/paleo/admin/associations/bindings/replace", {
+    method: "PUT",
+    body: JSON.stringify({ adminUserId, associationIds }),
+  });
+}

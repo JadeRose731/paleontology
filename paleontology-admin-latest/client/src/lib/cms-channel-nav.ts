@@ -133,6 +133,7 @@ export function parseAdminRoles(raw?: string | null): AdminRole[] {
 }
 
 export function channelAllowedForRole(channel: ApiCmsChannel, role: AdminRole): boolean {
+  if (role === "finance_reviewer") return false;
   if (role === "super_admin") return true;
   return parseAdminRoles(channel.adminRoles).includes(role);
 }
@@ -208,6 +209,10 @@ export function buildCmsMenuFromTree(
 }
 
 /** 从频道树提取动态路由权限 */
+function cmsRolesForChannel(channel: ApiCmsChannel): AdminRole[] {
+  return parseAdminRoles(channel.adminRoles).filter(r => r !== "finance_reviewer");
+}
+
 export function buildCmsRoutePermissions(
   tree: ApiCmsChannelTreeNode[]
 ): Record<string, AdminRole[]> {
@@ -220,9 +225,9 @@ export function buildCmsRoutePermissions(
     for (const node of nodes) {
       const channel = node.channel;
       if (channel.showInAdmin !== "0") {
-        const roles = parseAdminRoles(channel.adminRoles);
+        const roles = cmsRolesForChannel(channel);
         const section = resolveAdminSection(channel);
-        if (section) {
+        if (section && roles.length > 0) {
           permissions[contentPath(section)] = roles;
         }
       }

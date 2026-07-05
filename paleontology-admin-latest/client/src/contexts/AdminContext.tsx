@@ -14,6 +14,7 @@ import {
   reviewConferenceRegistration,
   reviewMembershipApplication,
   reviewMembershipPayment,
+  fetchAdminAssociationMine,
   type ApiMemberDirectoryRow,
 } from "@/lib/membership-api";
 import {
@@ -400,6 +401,8 @@ interface AdminContextType {
   adminLogout(): void;
   adminRole: AdminRole;
   adminBranchId: string | null;
+  /** DB 绑定的分会编码列表（branch_admin 数据范围） */
+  adminBoundBranchCodes: string[];
   canAccess(path: string): boolean;
   getAllowedMenuItems(): MenuItem[];
   getDefaultCmsPath(): string;
@@ -560,7 +563,7 @@ const ROUTE_PERMISSIONS: Record<string, AdminRole[]> = {
   "/admin/users/non-members": ["super_admin"],
   "/admin/users/members": ["super_admin"],
   "/admin/conferences": ["super_admin", "branch_admin"],
-  "/admin/statistics": ["super_admin", "branch_admin"],
+  "/admin/statistics": ["super_admin", "branch_admin", "finance_reviewer"],
   "/admin/finance": ["super_admin", "finance_reviewer"],
   "/admin/branches": ["super_admin"],
   "/admin/cms": ["super_admin", "branch_admin"],
@@ -806,11 +809,16 @@ function filterMembersByBranchScope(
   members: MemberRecord[],
   adminRole: AdminRole,
   adminBranchId: string | null,
+  boundBranchCodes: string[] = [],
 ): MemberRecord[] {
-  if (adminRole === "branch_admin" && adminBranchId) {
-    return members.filter(m => m.boundBranches.includes(adminBranchId));
-  }
-  return members;
+  if (adminRole !== "branch_admin") return members;
+  const codes = boundBranchCodes.length > 0
+    ? boundBranchCodes
+    : adminBranchId
+      ? [adminBranchId]
+      : [];
+  if (codes.length === 0) return members;
+  return members.filter(m => m.boundBranches.some(b => codes.includes(b)));
 }
 
 function buildReviewItem(
@@ -1890,6 +1898,7 @@ const AdminContext = createContext<AdminContextType | undefined>(undefined);
 
 export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
+  const [adminBoundBranchCodes, setAdminBoundBranchCodes] = useState<string[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [cmsMenuChildren, setCmsMenuChildren] = useState<MenuItem[] | null>(null);
   const [cmsRoutePermissions, setCmsRoutePermissions] = useState<Record<string, AdminRole[]>>({});
@@ -1897,6 +1906,30 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const adminRoleRef = useRef<AdminRole>("super_admin");
 
   const triggerRefresh = useCallback(() => setRefreshTrigger(t => t + 1), []);
+
+  /** 从 DB 绑定同步分会范围；offline 时保留 JWT / fallback */
+  const applyAdminScope = useCallback(async (user: AdminUser): Promise<AdminUser> => {
+    if (user.role !== "branch_admin") {
+      setAdminBoundBranchCodes([]);
+      return user;
+    }
+    try {
+      const mine = await fetchAdminAssociationMine();
+      const codes = mine.branchCodes?.filter(Boolean) ?? [];
+      setAdminBoundBranchCodes(codes);
+      if (codes.length > 0) {
+        return { ...user, branchId: codes[0] };
+      }
+      if (user.branchId) {
+        setAdminBoundBranchCodes([user.branchId]);
+      }
+      return user;
+    } catch {
+      const fallbackCodes = user.branchId ? [user.branchId] : [];
+      setAdminBoundBranchCodes(fallbackCodes);
+      return user;
+    }
+  }, []);
 
   // Load persisted admin session — 以 CMS JWT /getInfo 为准
   useEffect(() => {
@@ -1910,12 +1943,13 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const role = info.role as AdminRole;
         const adminDb = JSON.parse(localStorage.getItem("paleo_admin_db") || JSON.stringify(BUILT_IN_ADMINS));
         const fallback = adminDb.find((a: AdminUser & { password?: string }) => a.email === storedEmail);
-        setAdminUser({
+        const baseUser: AdminUser = {
           email: storedEmail,
           name: info.displayName || fallback?.name || storedEmail,
           role,
           branchId: info.branchId || info.branchCode || fallback?.branchId,
-        });
+        };
+        setAdminUser(await applyAdminScope(baseUser));
       } catch (err) {
         if (err instanceof CmsAuthError) {
           localStorage.removeItem("paleo_admin_current_user");
@@ -1926,7 +1960,9 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const adminDb = JSON.parse(localStorage.getItem("paleo_admin_db") || JSON.stringify(BUILT_IN_ADMINS));
         const found = adminDb.find((a: AdminUser & { password?: string }) => a.email === storedEmail);
         if (found) {
-          setAdminUser({ email: found.email, name: found.name, role: found.role, branchId: found.branchId });
+          const user: AdminUser = { email: found.email, name: found.name, role: found.role, branchId: found.branchId };
+          setAdminUser(user);
+          setAdminBoundBranchCodes(found.branchId ? [found.branchId] : []);
           toast.error("无法连接 CMS 后端，当前为离线演示身份，API 审核功能不可用");
         }
       }
@@ -1958,9 +1994,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         role,
         branchId: info.branchId || info.branchCode || loginResult.branchCode || loginResult.branchId || undefined,
       };
-      setAdminUser(user);
-      localStorage.setItem("paleo_admin_current_user", user.email);
-      toast.success(`欢迎回来，${user.name}`);
+      const scopedUser = await applyAdminScope(user);
+      setAdminUser(scopedUser);
+      localStorage.setItem("paleo_admin_current_user", scopedUser.email);
+      toast.success(`欢迎回来，${scopedUser.name}`);
       return true;
     } catch (cmsErr) {
       // CMS 后端不可用时的 offline fallback
@@ -1972,6 +2009,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (found) {
         const user: AdminUser = { email: found.email, name: found.name, role: found.role, branchId: found.branchId };
         setAdminUser(user);
+        setAdminBoundBranchCodes(found.branchId ? [found.branchId] : []);
         localStorage.setItem("paleo_admin_current_user", user.email);
         toast.warning("CMS 后端未连接，已使用离线演示身份（API 权限校验不可用）");
         return true;
@@ -1987,6 +2025,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const adminLogout = useCallback(() => {
     setAdminUser(null);
+    setAdminBoundBranchCodes([]);
     localStorage.removeItem("paleo_admin_current_user");
     clearCmsToken();
     clearCmsLoginCredentials();
@@ -2006,6 +2045,12 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setCmsMenuChildren(null);
       setCmsRoutePermissions({});
       setCmsMenuLoaded(false);
+      return;
+    }
+    if (adminRoleRef.current === "finance_reviewer") {
+      setCmsMenuChildren([]);
+      setCmsRoutePermissions({});
+      setCmsMenuLoaded(true);
       return;
     }
     try {
@@ -2495,7 +2540,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     })();
 
     // Phase 1: 分会管理员数据权限隔离
-    let filtered = filterMembersByBranchScope(members, adminRole, adminBranchId);
+    let filtered = filterMembersByBranchScope(members, adminRole, adminBranchId, adminBoundBranchCodes);
     if (filters?.search) {
       const s = filters.search.toLowerCase();
       filtered = filtered.filter(m => m.email.toLowerCase().includes(s) || m.name.includes(s));
@@ -2507,7 +2552,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       filtered = filtered.filter(m => m.boundBranches.includes(filters.branchId!));
     }
     return filtered;
-  }, [apiMemberRecords, adminRole, adminBranchId]);
+  }, [apiMemberRecords, adminRole, adminBranchId, adminBoundBranchCodes]);
 
   const getMemberDetail = useCallback((email: string): MemberDetail | null => {
     const members = getAllMembers();
@@ -2573,15 +2618,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const getAllConferences = useCallback((): ConferenceRecord[] => {
     const stored = localStorage.getItem("paleo_admin_conferences_db");
     const rawConfs: ConferenceRecord[] = stored ? JSON.parse(stored) : DEFAULT_CONFERENCES;
-    // Phase 1: 分会管理员数据权限隔离
-    const confs = adminRole === "branch_admin" && adminBranchId
-      ? rawConfs.filter(c => c.branchId === adminBranchId)
+    const scopeCodes = adminBoundBranchCodes.length > 0
+      ? adminBoundBranchCodes
+      : adminBranchId
+        ? [adminBranchId]
+        : [];
+    const confs = adminRole === "branch_admin" && scopeCodes.length > 0
+      ? rawConfs.filter(c => scopeCodes.includes(c.branchId))
       : rawConfs;
     return confs.map((c: ConferenceRecord) => ({
       ...c,
       registrations: countConfirmedAttendees(c.id, c),
     }));
-  }, [adminRole, adminBranchId]);
+  }, [adminRole, adminBranchId, adminBoundBranchCodes]);
 
   const getBranchConferences = useCallback(
     (branchId: string): ConferenceRecord[] => {
@@ -2594,8 +2643,13 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const createConference = useCallback((data: ConferenceData) => {
     const safeData = sanitizeConferenceData(data);
     // Phase 1: 分会管理员只能为本分会创建会议
-    if (adminRole === "branch_admin" && adminBranchId && safeData.branchId !== adminBranchId) {
-      toast.error("您只能为本分会创建会议");
+    const scopeCodes = adminBoundBranchCodes.length > 0
+      ? adminBoundBranchCodes
+      : adminBranchId
+        ? [adminBranchId]
+        : [];
+    if (adminRole === "branch_admin" && scopeCodes.length > 0 && !scopeCodes.includes(safeData.branchId)) {
+      toast.error("您只能为已绑定的分会创建会议");
       return;
     }
     const stored = localStorage.getItem("paleo_admin_conferences_db");
@@ -3424,6 +3478,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     adminLogout,
     adminRole,
     adminBranchId,
+    adminBoundBranchCodes,
     canAccess,
     getAllowedMenuItems,
     getDefaultCmsPath,
