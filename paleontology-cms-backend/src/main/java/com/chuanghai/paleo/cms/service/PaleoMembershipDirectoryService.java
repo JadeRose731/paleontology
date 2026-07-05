@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,23 +20,6 @@ import java.util.stream.Collectors;
 
 @Service
 public class PaleoMembershipDirectoryService {
-
-    /** paleo_association.association_id → 前端分会编码（与 V11 种子顺序对齐） */
-    private static final Map<Long, String> ASSOCIATION_BRANCH_CODES;
-
-    static {
-        Map<Long, String> map = new HashMap<>();
-        map.put(1L, "zgswxh");
-        map.put(2L, "gwjzdwxfh");
-        map.put(3L, "gzwxfh");
-        map.put(4L, "kpgzwyh");
-        map.put(6L, "wtxfh");
-        map.put(7L, "hszlzwyh");
-        map.put(8L, "gjzdw");
-        map.put(10L, "gst");
-        map.put(11L, "bfxfh");
-        ASSOCIATION_BRANCH_CODES = Collections.unmodifiableMap(map);
-    }
 
     @Autowired
     private PaleoUserService userService;
@@ -96,11 +78,19 @@ public class PaleoMembershipDirectoryService {
 
         Map<Long, List<String>> branchCodeMap = new HashMap<>();
         Map<Long, List<String>> branchNameMap = new HashMap<>();
+        Map<Long, String> assocBranchCodes = associationMapper.selectList(new LambdaQueryWrapper<PaleoAssociation>()
+                        .isNotNull(PaleoAssociation::getBranchCode))
+                .stream()
+                .collect(Collectors.toMap(PaleoAssociation::getAssociationId,
+                        PaleoAssociation::getBranchCode, (a, b) -> a));
         for (PaleoUserBinding binding : userBindingMapper.selectList(new LambdaQueryWrapper<PaleoUserBinding>()
                 .in(PaleoUserBinding::getUserId, userIds)
                 .eq(PaleoUserBinding::getBindingStatus, "BOUND"))) {
             Long assocId = binding.getAssociationId();
-            String code = ASSOCIATION_BRANCH_CODES.getOrDefault(assocId, String.valueOf(assocId));
+            String code = assocBranchCodes.get(assocId);
+            if (code == null || "zgswxh".equals(code)) {
+                continue;
+            }
             String name = associationNames.getOrDefault(assocId, code);
             branchCodeMap.computeIfAbsent(binding.getUserId(), k -> new ArrayList<>()).add(code);
             branchNameMap.computeIfAbsent(binding.getUserId(), k -> new ArrayList<>()).add(name);

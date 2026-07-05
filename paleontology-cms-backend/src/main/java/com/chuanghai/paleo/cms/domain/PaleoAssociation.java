@@ -12,6 +12,8 @@ public class PaleoAssociation {
     private Long associationId;
     private String associationName;
     private String associationType;
+    /** 前端分会编码，如 gwjzdwxfh */
+    private String branchCode;
     private Integer sortOrder;
     private String status;
 }

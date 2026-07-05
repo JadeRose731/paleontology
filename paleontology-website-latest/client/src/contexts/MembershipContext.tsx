@@ -20,10 +20,12 @@ import {
   ALL_SOCIETY_UNITS,
   CONFIRMED_PAYMENT_STATUSES,
   isDeadlinePassed,
+  isKnownConferenceCode,
 } from "@shared/constants";
 import {
   clearUserToken,
   cancelMembershipApplication,
+  bindBranch,
   createConferenceRegistration,
   createMembershipApplication,
   createMembershipPayment,
@@ -33,6 +35,7 @@ import {
   uploadMembershipApplicationFile,
   dataUrlToFile,
   fetchAuthInfo,
+  fetchMyBranchBindings,
   fetchMyConferenceRegistrations,
   fetchMyMembershipPayments,
   getUserToken,
@@ -42,6 +45,7 @@ import {
   mapApiUserToLocal,
   registerUser,
   setUserToken,
+  unbindBranch,
   updateUserTypeApi,
   uploadConferenceRegistrationFile,
   uploadMembershipPaymentFile,
@@ -156,6 +160,9 @@ export interface ConferenceReg {
   lockedAmount?: number;
   /** 后端报名记录 ID */
   registrationId?: number;
+  /** 后端会议编码与标题（API 同步） */
+  conferenceCode?: string;
+  conferenceTitle?: string;
   /** @deprecated 旧字段兼容，Phase 2 移除 */
   conferenceForm?: any;
   /** @deprecated 旧字段兼容，Phase 2 移除 */
@@ -265,7 +272,7 @@ interface MembershipContextType {
   submitMembershipInvoice: (invoiceUrl: string, fileName?: string) => Promise<boolean>;
 
   // 分会绑定/解绑（无需审核，仅需有效会员资格）
-  toggleBranchBinding: (branchId: string) => void;
+  toggleBranchBinding: (branchId: string) => Promise<void>;
 
   // ── Conference actions（两阶段） ──
   /** @deprecated Phase 2: 请使用 submitConferenceVoucher */
@@ -509,11 +516,12 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
     }
 
-    const [payments, registrations, joinApps, withdrawApps] = await Promise.all([
+    const [payments, registrations, joinApps, withdrawApps, branchBindings] = await Promise.all([
       fetchMyMembershipPayments(),
       fetchMyConferenceRegistrations(),
       fetchMyMembershipApplications("JOIN"),
       fetchMyMembershipApplications("WITHDRAW"),
+      getUserToken() ? fetchMyBranchBindings().catch(() => [] as string[]) : Promise.resolve([] as string[]),
     ]);
 
     const latestPayment = payments[0];
@@ -668,11 +676,13 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const confRegs: { [confId: string]: ConferenceReg } = {};
     for (const reg of registrations) {
-      if (!reg.conferenceCode) continue;
+      if (!reg.conferenceCode || !isKnownConferenceCode(reg.conferenceCode)) continue;
       const mapped = mapApiRegistrationToConferenceReg(reg);
       confRegs[reg.conferenceCode] = {
         ...mapped,
         registrationId: reg.registrationId,
+        conferenceCode: reg.conferenceCode,
+        conferenceTitle: reg.conferenceTitle,
         name: currentUser?.name || "",
         gender: currentUser?.gender || "男",
         unit: currentUser?.unit || "",
@@ -682,12 +692,16 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     }
 
+    const syncedBranches = Array.from(new Set(branchBindings.filter((id) => id && id !== "zgswxh")));
+
     setSocietyMembership(membership);
     setConferenceRegs(confRegs);
+    setBoundBranches(syncedBranches);
     setMembershipApplication(nextMembershipApp);
     setWithdrawalApplication(nextWithdrawalApp);
     saveState(`paleo_society_membership_${email}`, membership);
     saveState(`paleo_confs_${email}`, confRegs);
+    saveState(`paleo_bound_branches_${email}`, syncedBranches);
     if (nextMembershipApp) {
       localStorage.setItem(`paleo_membership_application_${email}`, JSON.stringify(nextMembershipApp));
     } else {
@@ -1005,39 +1019,47 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // 分会绑定/解绑
   // ==========================================
 
-  const toggleBranchBinding = (branchId: string) => {
+  const toggleBranchBinding = async (branchId: string) => {
     if (!currentUser) {
       toast.error("请先登录系统。");
       return;
     }
 
-    // Phase 2: 所有注册用户均可绑定任意学会/分会（无门槛）
-
-    const isBound = boundBranches.includes(branchId);
-    let updatedBranches: string[];
-
-    if (isBound) {
-      updatedBranches = boundBranches.filter(id => id !== branchId);
-      const branchName = getBranchName(branchId);
-      addNotification({
-        title: "已解绑分会",
-        content: `您已成功解绑【${branchName}】，将不再接收该分会的会议通知和学术资讯。`,
-        type: "info"
-      });
-      toast.success(`已解绑【${branchName}】。`);
-    } else {
-      updatedBranches = Array.from(new Set([...boundBranches, branchId]));
-      const branchName = getBranchName(branchId);
-      addNotification({
-        title: "成功绑定分会",
-        content: `您已成功绑定【${branchName}】！今后将自动接收该分会发布的会议通知和学术资讯。`,
-        type: "success"
-      });
-      toast.success(`已成功绑定【${branchName}】！`);
+    if (branchId === "zgswxh") {
+      toast.error("总学会默认已绑定，无需操作。");
+      return;
     }
 
-    setBoundBranches(updatedBranches);
-    saveState(`paleo_bound_branches_${currentUser.email}`, updatedBranches);
+    const isBound = boundBranches.includes(branchId);
+    const branchName = getBranchName(branchId);
+
+    try {
+      const updatedBranches = isBound
+        ? await unbindBranch(branchId)
+        : await bindBranch(branchId);
+
+      const syncedBranches = Array.from(new Set(updatedBranches.filter((id) => id && id !== "zgswxh")));
+      setBoundBranches(syncedBranches);
+      saveState(`paleo_bound_branches_${currentUser.email}`, syncedBranches);
+
+      if (isBound) {
+        addNotification({
+          title: "已解绑分会",
+          content: `您已成功解绑【${branchName}】，将不再接收该分会的会议通知和学术资讯。`,
+          type: "info",
+        });
+        toast.success(`已解绑【${branchName}】。`);
+      } else {
+        addNotification({
+          title: "成功绑定分会",
+          content: `您已成功绑定【${branchName}】！今后将自动接收该分会发布的会议通知和学术资讯。`,
+          type: "success",
+        });
+        toast.success(`已成功绑定【${branchName}】！`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "分会绑定操作失败");
+    }
   };
 
   // ==========================================

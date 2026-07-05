@@ -229,6 +229,63 @@ export const CONFERENCE_BRANCH_MAP: Record<string, string> = {
   "conf-zgswxh-2": "zgswxh", // 中国古生物学会（总学会）
 };
 
+/** 前端公开会议展示信息（与 Services / PersonalCenter 共用） */
+export const PUBLIC_CONFERENCE_DISPLAY: Record<string, {
+  title: string;
+  branchName: string;
+  time: string;
+  location: string;
+  fee: number;
+}> = {
+  "demo-conf": { title: "【演示会议】古无脊椎动物学学术工作坊", branchName: "古无脊椎动物学分会", time: "2026年06月15日", location: "线上 · 腾讯会议", fee: 300 },
+  "conf-1": { title: "第十五届全国微体古生物学学术研讨会", branchName: "微体学分会", time: "2026年11月15日 - 11月18日", location: "江苏 · 南京", fee: 1200 },
+  "conf-2": { title: "2026年度古植物学与环境演变论坛", branchName: "古植物学分会", time: "2026年12月05日 - 12月07日", location: "北京 · 中国科学院", fee: 800 },
+  "conf-3": { title: "热河生物群国际学术研讨会", branchName: "古脊椎动物学分会", time: "2027年03月20日 - 03月23日", location: "辽宁 · 朝阳", fee: 1500 },
+  "conf-4": { title: "第十二届全国古脊椎动物学学术年会", branchName: "古脊椎动物学分会", time: "2026年09月18日 - 09月21日", location: "云南 · 昆明", fee: 1000 },
+  "conf-5": { title: "中国孢粉学会第十届全国学术大会", branchName: "孢粉学分会", time: "2026年10月22日 - 10月25日", location: "广东 · 广州", fee: 900 },
+  "conf-6": { title: "古生态学与古环境重建国际研讨会", branchName: "古生态专业分会", time: "2026年08月10日 - 08月13日", location: "四川 · 成都", fee: 1100 },
+  "conf-7": { title: "地球生物学前沿论坛", branchName: "地球生物学分会", time: "2026年07月05日 - 07月07日", location: "湖北 · 武汉", fee: 600 },
+  "conf-8": { title: "古生物学新技术新方法专题研讨会", branchName: "新技术新方法专业委员会", time: "2026年11月28日 - 11月30日", location: "湖北 · 武汉（中国地质大学）", fee: 500 },
+  "conf-zgswxh-1": { title: "中国古生物学会第32届学术年会", branchName: "中国古生物学会（总学会）", time: "2026年12月10日 - 12月14日", location: "北京 · 国家会议中心", fee: 1200 },
+  "conf-zgswxh-2": { title: "中国古生物学会国际古生物学前沿论坛", branchName: "中国古生物学会（总学会）", time: "2027年05月08日 - 05月10日", location: "上海 · 复旦大学", fee: 800 },
+};
+
+/** 是否为有效的前端会议编码（排除 legacy 历史数据） */
+export function isKnownConferenceCode(code: string): boolean {
+  if (!code || code.startsWith("legacy-")) return false;
+  return code in CONFERENCE_BRANCH_MAP;
+}
+
+/** 是否已开始会议报名流程（非 unpaid） */
+export function isActiveConferenceRegistration(status?: string): boolean {
+  return !!status && status !== "unpaid";
+}
+
+/** 是否与学会服务页「报名完成」状态一致 */
+export function isConferenceRegistrationComplete(status?: string): boolean {
+  return status === "confirmed"
+    || status === "submitted"
+    || status === "approved_unfilled"
+    || status === "approved_invoice";
+}
+
+export function getConferenceDisplayInfo(
+  confId: string,
+  reg?: { conferenceTitle?: string; lockedAmount?: number },
+) {
+  const catalog = PUBLIC_CONFERENCE_DISPLAY[confId];
+  const branchId = CONFERENCE_BRANCH_MAP[confId] || "";
+  const branchName = ALL_SOCIETY_UNITS[branchId] || catalog?.branchName || "未知分会";
+  return {
+    title: reg?.conferenceTitle || catalog?.title || `会议 #${confId}`,
+    branchName,
+    branchId,
+    time: catalog?.time || "-",
+    location: catalog?.location || "-",
+    fee: reg?.lockedAmount ?? catalog?.fee ?? 0,
+  };
+}
+
 // ── 四类会议费类型 Phase 0 新增 ────────────────────────────────────────
 
 export const CONFERENCE_FEE_TYPE = {

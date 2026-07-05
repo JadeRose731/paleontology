@@ -7,38 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { CONFERENCE_FEE_TYPE_LABEL, CONFERENCE_BRANCH_MAP, ALL_SOCIETY_UNITS, TOTAL_SOCIETY_ID } from "@shared/constants";
+import { CONFERENCE_FEE_TYPE_LABEL, ALL_SOCIETY_UNITS, TOTAL_SOCIETY_ID, BRANCH_MAP, getConferenceDisplayInfo, isActiveConferenceRegistration, isKnownConferenceCode } from "@shared/constants";
 import { pickFile } from "../lib/fileUpload";
-
-// 分会 ID → 名称映射（与 Services.tsx 保持一致）
-const BRANCH_MAP: Record<string, string> = {
-  "gwjzdwxfh": "古无脊椎动物学分会",
-  "kpgzwyh": "科普工作委员会",
-  "bfxfh": "孢粉学分会",
-  "wtxfh": "微体学分会",
-  "hszlzwyh": "化石藻类专业委员会",
-  "gzwxfh": "古植物学分会",
-  "dqswx": "地球生物学分会",
-  "gst": "古生态专业分会",
-  "gjzdw": "古脊椎动物学分会",
-  "swcj": "生物沉积学分会",
-  "xjsxff": "新技术新方法专业委员会",
-};
-
-// 会议 ID → 名称映射（与 Services.tsx 保持一致，共 9 场）
-const CONF_MAP: Record<string, { title: string; branchName: string; time: string; location: string; fee: number }> = {
-  "demo-conf": { title: "【演示会议】古无脊椎动物学学术工作坊", branchName: "古无脊椎动物学分会", time: "2026年06月15日", location: "线上 · 腾讯会议", fee: 300 },
-  "conf-1": { title: "第十五届全国微体古生物学学术研讨会", branchName: "微体学分会", time: "2026年11月15日 - 11月18日", location: "江苏 · 南京", fee: 1200 },
-  "conf-2": { title: "2026年度古植物学与环境演变论坛", branchName: "古植物学分会", time: "2026年12月05日 - 12月07日", location: "北京 · 中国科学院", fee: 800 },
-  "conf-3": { title: "热河生物群国际学术研讨会", branchName: "古脊椎动物学分会", time: "2027年03月20日 - 03月23日", location: "辽宁 · 朝阳", fee: 1500 },
-  "conf-4": { title: "第十二届全国古脊椎动物学学术年会", branchName: "古脊椎动物学分会", time: "2026年09月18日 - 09月21日", location: "云南 · 昆明", fee: 1000 },
-  "conf-5": { title: "中国孢粉学会第十届全国学术大会", branchName: "孢粉学分会", time: "2026年10月22日 - 10月25日", location: "广东 · 广州", fee: 900 },
-  "conf-6": { title: "古生态学与古环境重建国际研讨会", branchName: "古生态专业分会", time: "2026年08月10日 - 08月13日", location: "四川 · 成都", fee: 1100 },
-  "conf-7": { title: "地球生物学前沿论坛", branchName: "地球生物学分会", time: "2026年07月05日 - 07月07日", location: "湖北 · 武汉", fee: 600 },
-  "conf-8": { title: "古生物学新技术新方法专题研讨会", branchName: "新技术新方法专业委员会", time: "2026年11月28日 - 11月30日", location: "湖北 · 武汉（中国地质大学）", fee: 500 },
-  "conf-zgswxh-1": { title: "中国古生物学会第32届学术年会", branchName: "中国古生物学会（总学会）", time: "2026年12月10日 - 12月14日", location: "北京 · 国家会议中心", fee: 1200 },
-  "conf-zgswxh-2": { title: "中国古生物学会国际古生物学前沿论坛", branchName: "中国古生物学会（总学会）", time: "2027年05月08日 - 05月10日", location: "上海 · 复旦大学", fee: 800 },
-};
 
 export default function PersonalCenter() {
   const { currentUser, isLoggedIn, societyMembership, boundBranches, conferenceRegs, userType, logout, deleteAccount, updateProfile, withdrawalApplication, submitWithdrawalApplication, cancelWithdrawalApplication, getWithdrawalApplicationTemplateUrl } = useMembership();
@@ -126,12 +96,14 @@ export default function PersonalCenter() {
     name: BRANCH_MAP[id] || id,
   }));
 
-  // 会议报名记录
-  const myConferences = Object.entries(conferenceRegs || {}).map(([confId, reg]: [string, any]) => ({
-    confId,
-    confInfo: CONF_MAP[confId] || { title: `会议 #${confId}`, branchName: "未知分会", time: "-", location: "-", fee: reg.feeAmount || 0 },
-    ...reg,
-  }));
+  // 会议报名记录（与学会服务页共用数据源，过滤 legacy 与未开始缴费的记录）
+  const myConferences = Object.entries(conferenceRegs || {})
+    .filter(([confId, reg]: [string, any]) => isKnownConferenceCode(confId) && isActiveConferenceRegistration(reg.status))
+    .map(([confId, reg]: [string, any]) => ({
+      confId,
+      confInfo: getConferenceDisplayInfo(confId, reg),
+      ...reg,
+    }));
 
   // 缴费记录（学会会费历史 + 会议费）
   // 当 history 为空但 status 已有记录时，直接构建一条显示
@@ -164,17 +136,16 @@ export default function PersonalCenter() {
         }]
       : [];
   const confPayHistory = Object.entries(conferenceRegs || {})
-    .filter(([, reg]: [string, any]) => reg.status && reg.status !== "unpaid")
+    .filter(([confId, reg]: [string, any]) => isKnownConferenceCode(confId) && isActiveConferenceRegistration(reg.status))
     .map(([confId, reg]: [string, any]) => {
-      const branchId = CONFERENCE_BRANCH_MAP[confId] || "";
-      const branchName = ALL_SOCIETY_UNITS[branchId] || CONF_MAP[confId]?.branchName || "未知学会";
+      const display = getConferenceDisplayInfo(confId, reg);
       const feeType = reg.feeType as keyof typeof CONFERENCE_FEE_TYPE_LABEL | undefined;
       return {
         confId,
-        title: CONF_MAP[confId]?.title || `会议 #${confId}`,
-        branchId,
-        branchName,
-        fee: reg.lockedAmount ?? CONF_MAP[confId]?.fee ?? 0,
+        title: display.title,
+        branchId: display.branchId,
+        branchName: display.branchName,
+        fee: reg.lockedAmount ?? display.fee,
         status: reg.status,
         submittedAt: reg.voucherSubmitTime || reg.lastUpdated || reg.submittedAt || "-",
         voucherUrl: reg.paymentVoucher || "",

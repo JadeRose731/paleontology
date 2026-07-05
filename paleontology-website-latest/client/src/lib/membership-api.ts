@@ -291,6 +291,24 @@ export async function fetchMyConferenceRegistrations() {
   return request<ApiConferenceRegistration[]>("/paleo/conferences/registrations/mine");
 }
 
+export async function fetchMyBranchBindings() {
+  return request<string[]>("/paleo/user-bindings/mine");
+}
+
+export async function bindBranch(branchCode: string) {
+  return request<string[]>("/paleo/user-bindings/mine/bind", {
+    method: "POST",
+    body: JSON.stringify({ branchCode }),
+  });
+}
+
+export async function unbindBranch(branchCode: string) {
+  return request<string[]>("/paleo/user-bindings/mine/unbind", {
+    method: "POST",
+    body: JSON.stringify({ branchCode }),
+  });
+}
+
 export async function createConferenceRegistration(conferenceCode: string, feeType: string, feeAmount: number) {
   return request<ApiConferenceRegistration>("/paleo/conferences/registrations/mine", {
     method: "POST",
@@ -327,6 +345,8 @@ export function mapApiRegistrationToConferenceReg(reg: ApiConferenceRegistration
   const status = mapApiPaymentStatus(reg.paymentStatus);
   return {
     status: status as "unpaid" | "voucher_submitted" | "voucher_rejected" | "invoice_pending" | "invoice_submitted" | "invoice_rejected" | "confirmed",
+    conferenceCode: reg.conferenceCode,
+    conferenceTitle: reg.conferenceTitle,
     paymentVoucher: reg.voucherUrl,
     invoiceUrl: reg.invoiceUrl,
     voucherSubmitTime: reg.voucherSubmitTime,
