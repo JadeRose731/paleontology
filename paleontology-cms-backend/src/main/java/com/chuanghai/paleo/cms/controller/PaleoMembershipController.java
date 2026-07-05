@@ -14,6 +14,9 @@ import com.chuanghai.paleo.cms.service.PaleoMemberProfileService;
 import com.chuanghai.paleo.cms.service.PaleoMembershipApplicationService;
 import com.chuanghai.paleo.cms.service.PaleoMembershipDirectoryService;
 import com.chuanghai.paleo.cms.service.PaleoMembershipPaymentService;
+import com.chuanghai.paleo.cms.domain.PaleoMembershipTemplate;
+import com.chuanghai.paleo.cms.security.Anonymous;
+import com.chuanghai.paleo.cms.service.PaleoMembershipTemplateService;
 import com.chuanghai.paleo.cms.service.PaleoUserService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -50,6 +53,41 @@ public class PaleoMembershipController extends BaseController {
 
     @Autowired
     private PaleoMembershipDirectoryService directoryService;
+
+    @Autowired
+    private PaleoMembershipTemplateService templateService;
+
+    @Anonymous
+    @ApiOperation("公开-入会/退会申请书模板")
+    @GetMapping("/templates/public")
+    public AjaxResult publicTemplates() {
+        return success(templateService.getPublicTemplates());
+    }
+
+    @ApiOperation("管理端-入会/退会申请书模板")
+    @GetMapping("/templates")
+    public AjaxResult adminTemplates() {
+        return success(templateService.getPublicTemplates());
+    }
+
+    @ApiOperation("管理端-上传入会/退会申请书模板")
+    @PostMapping("/templates/{templateType}/upload")
+    public AjaxResult uploadTemplate(@PathVariable String templateType,
+                                     @RequestParam("file") MultipartFile file) {
+        try {
+            String normalized = PaleoMembershipTemplateService.normalizeTemplateType(templateType);
+            LocalFileStorageService.StoredFile stored = fileStorageService.store(file);
+            PaleoMembershipTemplate saved = templateService.upsert(
+                    normalized, stored.originalName, stored.url, getUsername());
+            AjaxResult ajax = success("模板上传成功");
+            ajax.put("data", saved);
+            return ajax;
+        } catch (IllegalArgumentException ex) {
+            return error(ex.getMessage());
+        } catch (Exception ex) {
+            return error("模板上传失败: " + ex.getMessage());
+        }
+    }
 
     @ApiOperation("管理端-用户会员目录")
     @GetMapping("/admin/directory")

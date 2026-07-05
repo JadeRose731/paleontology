@@ -28,6 +28,7 @@ import {
   createMembershipApplication,
   createMembershipPayment,
   fetchMyMembershipApplications,
+  fetchPublicMembershipTemplates,
   mapApiApplicationReviewStatus,
   uploadMembershipApplicationFile,
   dataUrlToFile,
@@ -307,9 +308,9 @@ interface MembershipContextType {
   // Phase 6: 入会/退会申请
   membershipApplication: MembershipApplication | null;
   withdrawalApplication: WithdrawalApplication | null;
-  submitMembershipApplication: (applicationFileUrl: string, applicationFileName: string) => Promise<boolean>;
+  submitMembershipApplication: (file: File) => Promise<boolean>;
   cancelMembershipApplication: () => void;
-  submitWithdrawalApplication: (applicationFileUrl: string, applicationFileName: string) => Promise<boolean>;
+  submitWithdrawalApplication: (file: File) => Promise<boolean>;
   cancelWithdrawalApplication: () => void;
   getMembershipApplicationTemplateUrl: () => string;
   getWithdrawalApplicationTemplateUrl: () => string;
@@ -371,6 +372,23 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Phase 6: 入会/退会申请书状态
   const [membershipApplication, setMembershipApplication] = useState<MembershipApplication | null>(null);
   const [withdrawalApplication, setWithdrawalApplication] = useState<WithdrawalApplication | null>(null);
+  const [joinTemplateUrl, setJoinTemplateUrl] = useState("");
+  const [joinTemplateName, setJoinTemplateName] = useState("");
+  const [withdrawTemplateUrl, setWithdrawTemplateUrl] = useState("");
+  const [withdrawTemplateName, setWithdrawTemplateName] = useState("");
+
+  useEffect(() => {
+    fetchPublicMembershipTemplates()
+      .then((templates) => {
+        setJoinTemplateUrl(templates.join?.fileUrl || "");
+        setJoinTemplateName(templates.join?.fileName || "");
+        setWithdrawTemplateUrl(templates.withdraw?.fileUrl || "");
+        setWithdrawTemplateName(templates.withdraw?.fileName || "");
+      })
+      .catch(() => {
+        // 模板未配置时不阻断页面
+      });
+  }, []);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -619,6 +637,15 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     } else if (resolvedProfile?.memberStatus === "PENDING") {
       membership = { ...membership, status: "application_approved", history: membership.history };
+    } else if (resolvedProfile?.memberStatus === "EXPIRED") {
+      membership = {
+        ...membership,
+        status: "expired",
+        expiryDate: resolvedProfile.validEndDate || membership.expiryDate,
+        history: membership.history,
+      };
+    } else if (resolvedProfile?.memberStatus === "WITHDRAWN") {
+      membership = { ...membership, status: "withdrawn", history: membership.history };
     }
 
     if (latestWithdraw && !pendingWithdraw) {
@@ -679,6 +706,12 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (membership.status === "active" && apiUserType !== "member") {
           await updateUserTypeApi("member", true);
           apiUserType = "member";
+        } else if (
+          (membership.status === "expired" || membership.status === "withdrawn")
+          && apiUserType !== "non_member"
+        ) {
+          await updateUserTypeApi("non_member", true);
+          apiUserType = "non_member";
         }
         setUserType(apiUserType);
         localStorage.setItem(`paleo_user_type_${email}`, apiUserType);
@@ -1418,9 +1451,10 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // ==========================================
 
   /** 提交入会申请书 → status = application_submitted */
-  const submitMembershipApplicationAction = async (applicationFileUrl: string, applicationFileName: string): Promise<boolean> => {
+  const submitMembershipApplicationAction = async (file: File): Promise<boolean> => {
     if (!currentUser) { toast.error("请先登录系统。"); return false; }
     if (!getUserToken()) { toast.error("登录已过期，请重新登录。"); return false; }
+    if (!file) { toast.error("请先上传入会申请书（必填）。"); return false; }
 
     try {
       const existing = await fetchMyMembershipApplications("JOIN");
@@ -1439,16 +1473,13 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
       if (!created.applicationId) throw new Error("创建入会申请失败");
 
-      await uploadMembershipApplicationFile(
-        created.applicationId,
-        dataUrlToFile({ name: applicationFileName, dataUrl: applicationFileUrl }),
-      );
+      await uploadMembershipApplicationFile(created.applicationId, file);
 
       const optimisticApp: MembershipApplication = {
         applicationId: created.applicationId,
         status: "application_submitted",
-        applicationFileUrl,
-        applicationFileName,
+        applicationFileUrl: "",
+        applicationFileName: file.name,
         submitTime: new Date().toISOString(),
       };
       const optimisticMembership: SocietyMembership = {
@@ -1506,9 +1537,14 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   /** 提交退会申请书 → status = withdrawal_submitted */
-  const submitWithdrawalApplicationAction = async (applicationFileUrl: string, applicationFileName: string): Promise<boolean> => {
+  const submitWithdrawalApplicationAction = async (file: File): Promise<boolean> => {
     if (!currentUser) { toast.error("请先登录系统。"); return false; }
     if (!getUserToken()) { toast.error("登录已过期，请重新登录。"); return false; }
+    if (!file) { toast.error("请先上传退会申请书（必填）。"); return false; }
+    if (societyMembership.status !== "active") {
+      toast.error("仅有效会员需提交退会申请书。");
+      return false;
+    }
 
     try {
       const existing = await fetchMyMembershipApplications("WITHDRAW");
@@ -1525,10 +1561,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
       if (!created.applicationId) throw new Error("创建退会申请失败");
 
-      await uploadMembershipApplicationFile(
-        created.applicationId,
-        dataUrlToFile({ name: applicationFileName, dataUrl: applicationFileUrl }),
-      );
+      await uploadMembershipApplicationFile(created.applicationId, file);
       await syncBusinessStateFromApi(currentUser.email);
 
       addNotification({
@@ -1576,28 +1609,14 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   /** 获取入会申请书模板下载 URL */
   const getMembershipApplicationTemplateUrl = (): string => {
-    const stored = localStorage.getItem("paleo_membership_application_template");
-    if (stored) {
-      try {
-        const data = JSON.parse(stored);
-        const url = data.url || "";
-        return url.startsWith("data:") ? "" : url;
-      } catch { return ""; }
-    }
-    return "";
+    if (joinTemplateUrl.startsWith("data:")) return "";
+    return joinTemplateUrl;
   };
 
   /** 获取退会申请书模板下载 URL */
   const getWithdrawalApplicationTemplateUrl = (): string => {
-    const stored = localStorage.getItem("paleo_withdrawal_application_template");
-    if (stored) {
-      try {
-        const data = JSON.parse(stored);
-        const url = data.url || "";
-        return url.startsWith("data:") ? "" : url;
-      } catch { return ""; }
-    }
-    return "";
+    if (withdrawTemplateUrl.startsWith("data:")) return "";
+    return withdrawTemplateUrl;
   };
 
   const chooseMembershipPath = (path: "member" | "non_member") => {

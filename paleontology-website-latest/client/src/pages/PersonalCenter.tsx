@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { CONFERENCE_FEE_TYPE_LABEL, CONFERENCE_BRANCH_MAP, ALL_SOCIETY_UNITS, TOTAL_SOCIETY_ID } from "@shared/constants";
-import { pickAndReadFile, type UploadedFile } from "../lib/fileUpload";
+import { pickFile } from "../lib/fileUpload";
 
 // 分会 ID → 名称映射（与 Services.tsx 保持一致）
 const BRANCH_MAP: Record<string, string> = {
@@ -60,7 +60,7 @@ export default function PersonalCenter() {
   // Phase 6: 退会申请流程
   const [showWithdrawal, setShowWithdrawal] = useState(false);
   const [wdFlowStep, setWdFlowStep] = useState(0); // 0=not started, 1=download, 2=upload, 3=submitted
-  const [wdAppFile, setWdAppFile] = useState<UploadedFile | null>(null);
+  const [wdAppFile, setWdAppFile] = useState<File | null>(null);
 
   const [formData, setFormData] = useState({
     name: currentUser?.name || "",
@@ -587,13 +587,13 @@ export default function PersonalCenter() {
                   {showWithdrawal && wdFlowStep === 2 && (
                     <div className="space-y-4">
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-xs text-blue-800">
-                        <p className="font-bold mb-1">Step 2/3：上传退会申请书</p>
-                        <p className="text-blue-700">请上传填写完整的退会申请书（.doc/.docx/.pdf）。</p>
+                        <p className="font-bold mb-1">Step 2/3：上传退会申请书 <span className="text-red-600">【必填】</span></p>
+                        <p className="text-blue-700">有效会员申请退会须提交电子版退会申请书（.doc/.docx/.pdf），经管理员审核通过后正式解除会员资格。</p>
                       </div>
                       <div onClick={() => {
-                        pickAndReadFile(".doc,.docx,.pdf", 10, (file) => {
+                        pickFile(".doc,.docx,.pdf", 20, (file) => {
                           setWdAppFile(file);
-                          toast.success("退会申请书上传成功！");
+                          toast.success("退会申请书已选择");
                         });
                       }} className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${wdAppFile ? "border-green-500 bg-green-50/20" : "border-slate-300 hover:bg-slate-50 hover:border-orange-400"}`}>
                         {wdAppFile ? (
@@ -615,7 +615,7 @@ export default function PersonalCenter() {
                         <button
                           onClick={async () => {
                             if (!wdAppFile) { toast.error("请先上传退会申请书"); return; }
-                            const ok = await submitWithdrawalApplication(wdAppFile.dataUrl, wdAppFile.name);
+                            const ok = await submitWithdrawalApplication(wdAppFile);
                             if (ok) setWdFlowStep(0);
                           }}
                           disabled={!wdAppFile}

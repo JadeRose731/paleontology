@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAdmin, type ConferenceRecord, type ConferenceData } from "@/contexts/AdminContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Edit, MapPin, Calendar, Users, AlertCircle } from "lucide-react";
 import { ALL_SOCIETY_UNITS, type ConferenceFeeConfig, createDefaultFieldTripRoutes, FIELD_TRIP_GENDER_RESTRICTION_LABEL, type FieldTripGenderRestriction, type FieldTripRoute } from "@shared/constants";
 import { uploadCmsMedia } from "@/lib/cms-api";
+import { fetchMembershipTemplates, uploadMembershipTemplate } from "@/lib/membership-api";
 import { toast } from "sonner";
 
 const ALL_BRANCH_OPTIONS = Object.entries(ALL_SOCIETY_UNITS).map(([id, name]) => ({ value: id, label: name }));
@@ -98,27 +99,22 @@ function ConferenceForm({
   const [abstractTemplateFile, setAbstractTemplateFile] = useState<UploadedFileRef | null>(
     resolveStoredFile("template.docx", initialData?.abstractTemplateUrl, initialData?.abstractTemplateName)
   );
-  // Phase 6: 学会级别模板（入会/退会申请书）— 仅存 URL
-  const [membershipAppTemplateFile, setMembershipAppTemplateFile] = useState<UploadedFileRef | null>(() => {
-    const stored = localStorage.getItem("paleo_membership_application_template");
-    if (!stored) return null;
-    try {
-      const d = JSON.parse(stored);
-      return resolveStoredFile("入会申请书模板.docx", d.url, d.name);
-    } catch {
-      return null;
-    }
-  });
-  const [withdrawalAppTemplateFile, setWithdrawalAppTemplateFile] = useState<UploadedFileRef | null>(() => {
-    const stored = localStorage.getItem("paleo_withdrawal_application_template");
-    if (!stored) return null;
-    try {
-      const d = JSON.parse(stored);
-      return resolveStoredFile("退会申请书模板.docx", d.url, d.name);
-    } catch {
-      return null;
-    }
-  });
+  // Phase 6: 学会级别模板（入会/退会申请书）— 存后端，供用户端下载
+  const [membershipAppTemplateFile, setMembershipAppTemplateFile] = useState<UploadedFileRef | null>(null);
+  const [withdrawalAppTemplateFile, setWithdrawalAppTemplateFile] = useState<UploadedFileRef | null>(null);
+
+  useEffect(() => {
+    fetchMembershipTemplates()
+      .then((templates) => {
+        const join = resolveStoredFile("入会申请书模板.docx", templates.join?.fileUrl, templates.join?.fileName || undefined);
+        const withdraw = resolveStoredFile("退会申请书模板.docx", templates.withdraw?.fileUrl, templates.withdraw?.fileName || undefined);
+        setMembershipAppTemplateFile(join);
+        setWithdrawalAppTemplateFile(withdraw);
+      })
+      .catch(() => {
+        // 模板尚未配置
+      });
+  }, []);
 
   const handleFileUpload = async (
     fileType: "publicNotice" | "stampedNotice" | "abstractTemplate",
@@ -140,18 +136,22 @@ function ConferenceForm({
 
   const handleTemplateUpload = async (templateType: "membershipApp" | "withdrawalApp", file: File) => {
     const key = templateType;
+    const apiType = templateType === "membershipApp" ? "JOIN" : "WITHDRAW";
     setUploading((prev) => ({ ...prev, [key]: true }));
     try {
-      const ref = await uploadDocument(file, file.name);
-      const templateData = { name: ref.name, url: ref.url, updatedAt: new Date().toISOString() };
-      if (templateType === "membershipApp") {
-        setMembershipAppTemplateFile(ref);
-        localStorage.setItem("paleo_membership_application_template", JSON.stringify(templateData));
+      await uploadMembershipTemplate(apiType, file);
+      const templates = await fetchMembershipTemplates();
+      const info = apiType === "JOIN" ? templates.join : templates.withdraw;
+      const uploaded: UploadedFileRef = {
+        name: info?.fileName || file.name,
+        url: info?.fileUrl || "",
+      };
+      if (apiType === "JOIN") {
+        setMembershipAppTemplateFile(uploaded.url ? uploaded : null);
       } else {
-        setWithdrawalAppTemplateFile(ref);
-        localStorage.setItem("paleo_withdrawal_application_template", JSON.stringify(templateData));
+        setWithdrawalAppTemplateFile(uploaded.url ? uploaded : null);
       }
-      toast.success(`${file.name} 已上传`);
+      toast.success(`${file.name} 模板已上传，用户端可下载`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "上传失败");
     } finally {
@@ -580,11 +580,11 @@ function ConferenceForm({
       {/* Phase 6: 学会级别模板上传（入会/退会申请书） */}
       <div className="space-y-3 border-t border-slate-100 pt-4">
         <Label className="text-sm font-bold text-strata-blue-deep block">学会申请书模板管理</Label>
-        <p className="text-xs text-muted-foreground">以下模板为全局设置，供用户申请入会/退会时下载使用。</p>
+        <p className="text-xs text-muted-foreground">以下模板为全局设置，上传后供用户在入会/退会时下载填写。入会申请书与退会申请书均为用户必填项。</p>
         <div className="grid grid-cols-2 gap-4">
           {/* 入会申请书模板 */}
           <div className="space-y-2">
-            <Label htmlFor="file-membership-app-template" className="text-xs">入会申请书模板</Label>
+            <Label htmlFor="file-membership-app-template" className="text-xs">入会申请书模板 Word</Label>
             <div className="flex items-center gap-2">
               <label className="flex-1 cursor-pointer">
                 <input
@@ -618,7 +618,6 @@ function ConferenceForm({
                   className="text-party-red hover:text-party-red-dark text-xs font-bold"
                   onClick={() => {
                     setMembershipAppTemplateFile(null);
-                    localStorage.removeItem("paleo_membership_application_template");
                   }}
                 >
                   移除
@@ -628,7 +627,7 @@ function ConferenceForm({
           </div>
           {/* 退会申请书模板 */}
           <div className="space-y-2">
-            <Label htmlFor="file-withdrawal-app-template" className="text-xs">退会申请书模板</Label>
+            <Label htmlFor="file-withdrawal-app-template" className="text-xs">退会申请书模板 Word</Label>
             <div className="flex items-center gap-2">
               <label className="flex-1 cursor-pointer">
                 <input
@@ -662,7 +661,6 @@ function ConferenceForm({
                   className="text-party-red hover:text-party-red-dark text-xs font-bold"
                   onClick={() => {
                     setWithdrawalAppTemplateFile(null);
-                    localStorage.removeItem("paleo_withdrawal_application_template");
                   }}
                 >
                   移除

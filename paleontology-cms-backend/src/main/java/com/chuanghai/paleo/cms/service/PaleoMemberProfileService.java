@@ -61,6 +61,7 @@ public class PaleoMemberProfileService extends ServiceImpl<PaleoMemberProfileMap
         profile.setLatestApplicationId(application.getApplicationId());
         profile.setUpdateBy(operator);
         updateById(profile);
+        userService.updateUserType(application.getUserId(), "non_member", true, operator);
     }
 
     public void markPendingApplication(PaleoMembershipApplication application, String operator) {
@@ -89,6 +90,7 @@ public class PaleoMemberProfileService extends ServiceImpl<PaleoMemberProfileMap
             profile.setMemberStatus("EXPIRED");
             profile.setUpdateBy(operator);
             updateById(profile);
+            userService.updateUserType(profile.getUserId(), "non_member", true, operator);
         }
     }
 
@@ -101,6 +103,7 @@ public class PaleoMemberProfileService extends ServiceImpl<PaleoMemberProfileMap
             profile.setMemberStatus("EXPIRED");
             profile.setUpdateBy("paleo-expire-job");
             updateById(profile);
+            userService.updateUserType(profile.getUserId(), "non_member", true, "paleo-expire-job");
         }
         return profiles.size();
     }

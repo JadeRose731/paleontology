@@ -9,7 +9,7 @@ import { useCmsEntries } from "@/hooks/useCmsEntries";
 import { useServiceCategories } from "@/hooks/useServiceCategories";
 import { formatDate, type ApiCmsEntry } from "@/lib/cms-api";
 import type { ServiceContentModule } from "@/lib/services-categories";
-import { pickAndReadFile, type UploadedFile } from "../lib/fileUpload";
+import { pickAndReadFile, pickFile, type UploadedFile } from "../lib/fileUpload";
 import { CONFERENCE_STATUS_LABEL, CONFERENCE_STATUS_COLOR, CONFERENCE_STATUS, getConferenceFeeConfig as getConfiguredFeeConfig, type ConferenceFeeConfig, CONFERENCE_FEE_TYPE_LABEL, type ConferenceFeeType, ALL_SOCIETY_UNITS, TOTAL_SOCIETY_ID, TOTAL_SOCIETY_INTRO, TOTAL_SOCIETY_TAGS, TOTAL_SOCIETY_MEETINGS, isSocietyAccessible, isDeadlinePassed, sortConferencesSocietyFirst, ACCOMMODATION_TYPE_LABEL, type AccommodationType, FIELD_TRIP_PHASE_LABEL, type FieldTripRoute, type FieldTripSelections, createEmptyFieldTripSelections, createDefaultFieldTripRoutes, canSelectFieldTripRoute, validateFieldTripSelections, FIELD_TRIP_GENDER_RESTRICTION_LABEL } from "@shared/constants";
 
 const SCIENCE_FORMAT_LABELS: Record<string, string> = {
@@ -205,7 +205,7 @@ export default function Services() {
   const [memberInvoice, setMemberInvoice] = useState<UploadedFile | null>(null);
   // Phase 6: 入会申请流程
   const [appFlowStep, setAppFlowStep] = useState(0); // 0=not started, 1=download template, 2=upload, 3=submitted
-  const [memberAppFile, setMemberAppFile] = useState<UploadedFile | null>(null);
+  const [memberAppFile, setMemberAppFile] = useState<File | null>(null);
 
   // Sync profile data when editing conference form
   useEffect(() => {
@@ -1015,13 +1015,13 @@ export default function Services() {
                   {appFlowStep === 2 && (
                     <div className="space-y-4">
                       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-xs text-blue-800">
-                        <p className="font-bold mb-1">Step 2/3：上传入会申请书</p>
-                        <p className="text-blue-700">请上传填写完整的入会申请书（.doc/.docx/.pdf）。</p>
+                        <p className="font-bold mb-1">Step 2/3：上传入会申请书 <span className="text-red-600">【必填】</span></p>
+                        <p className="text-blue-700">请上传填写完整的电子版入会申请书（.doc/.docx/.pdf）。学生会员与非学生会员均须提交。</p>
                       </div>
                       <div onClick={() => {
-                        pickAndReadFile(".doc,.docx,.pdf", 10, (file) => {
+                        pickFile(".doc,.docx,.pdf", 20, (file) => {
                           setMemberAppFile(file);
-                          toast.success("入会申请书上传成功！");
+                          toast.success("入会申请书已选择");
                         });
                       }} className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${memberAppFile ? "border-green-500 bg-green-50/20" : "border-slate-300 hover:bg-slate-50 hover:border-[#002B49]"}`}>
                         {memberAppFile ? (
@@ -1044,7 +1044,7 @@ export default function Services() {
                           onClick={async () => {
                             if (!memberAppFile) { toast.error("请先上传入会申请书"); return; }
                             chooseMembershipPath("member");
-                            const ok = await submitMembershipApplication(memberAppFile.dataUrl, memberAppFile.name);
+                            const ok = await submitMembershipApplication(memberAppFile);
                             if (ok) {
                               setMemberAppFile(null);
                               setAppFlowStep(0);

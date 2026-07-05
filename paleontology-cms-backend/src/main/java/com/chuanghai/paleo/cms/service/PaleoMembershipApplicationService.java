@@ -2,6 +2,7 @@ package com.chuanghai.paleo.cms.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.chuanghai.paleo.cms.domain.PaleoMemberProfile;
 import com.chuanghai.paleo.cms.domain.PaleoMembershipApplication;
 import com.chuanghai.paleo.cms.mapper.PaleoMembershipApplicationMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -86,6 +87,12 @@ public class PaleoMembershipApplicationService extends ServiceImpl<PaleoMembersh
         if (pending != null) {
             String label = "WITHDRAW".equals(application.getApplicationType()) ? "退会" : "入会";
             throw new IllegalArgumentException("已有待审核的" + label + "申请，请勿重复提交");
+        }
+        if ("WITHDRAW".equals(application.getApplicationType())) {
+            PaleoMemberProfile profile = memberProfileService.getOrCreate(application.getUserId(), application.getCreateBy());
+            if (!"ACTIVE".equals(profile.getMemberStatus())) {
+                throw new IllegalArgumentException("仅有效会员可提交退会申请");
+            }
         }
         save(application);
         return application;

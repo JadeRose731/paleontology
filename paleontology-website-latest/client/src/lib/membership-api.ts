@@ -204,6 +204,26 @@ export async function uploadMembershipApplicationFile(applicationId: number, fil
   });
 }
 
+export interface ApiTemplateInfo {
+  fileName?: string | null;
+  fileUrl?: string | null;
+  updateTime?: string | null;
+}
+
+export interface ApiMembershipTemplates {
+  join: ApiTemplateInfo;
+  withdraw: ApiTemplateInfo;
+}
+
+export async function fetchPublicMembershipTemplates(): Promise<ApiMembershipTemplates> {
+  const res = await fetch(`${API_BASE}/paleo/membership/templates/public`);
+  const json = (await res.json()) as ApiResponse<ApiMembershipTemplates>;
+  if (!res.ok || json.code !== 200) {
+    throw new Error(json.msg || "获取模板失败");
+  }
+  return json.data as ApiMembershipTemplates;
+}
+
 export async function cancelMembershipApplication(applicationId: number) {
   return request<unknown>(`/paleo/membership/applications/mine/${applicationId}/cancel`, {
     method: "POST",

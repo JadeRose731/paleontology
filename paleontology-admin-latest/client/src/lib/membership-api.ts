@@ -192,3 +192,35 @@ export async function reviewConferenceRegistration(
     body: JSON.stringify({ paymentStatus, reviewComment: reviewComment || "" }),
   });
 }
+
+export interface ApiTemplateInfo {
+  fileName?: string | null;
+  fileUrl?: string | null;
+  updateTime?: string | null;
+}
+
+export interface ApiMembershipTemplates {
+  join: ApiTemplateInfo;
+  withdraw: ApiTemplateInfo;
+}
+
+export async function fetchMembershipTemplates(): Promise<ApiMembershipTemplates> {
+  return request<ApiMembershipTemplates>("/paleo/membership/templates");
+}
+
+export async function uploadMembershipTemplate(templateType: "JOIN" | "WITHDRAW", file: File) {
+  await ensureCmsAuth();
+  const form = new FormData();
+  form.append("file", file);
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/paleo/membership/templates/${templateType}/upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  const json = (await res.json()) as ApiResponse;
+  if (!res.ok || json.code !== 200) {
+    throw new Error(json.msg || "模板上传失败");
+  }
+  return json.data;
+}

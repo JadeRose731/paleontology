@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useMembership } from "@/contexts/MembershipContext";
-import { pickAndReadFile, type UploadedFile } from "@/lib/fileUpload";
+import { pickFile } from "@/lib/fileUpload";
 import { toast } from "sonner";
 
 interface MembershipApplicationDialogProps {
@@ -21,7 +21,7 @@ export default function MembershipApplicationDialog({ open, onOpenChange }: Memb
   } = useMembership();
 
   const [step, setStep] = useState<0 | 1 | 2>(0);
-  const [memberAppFile, setMemberAppFile] = useState<UploadedFile | null>(null);
+  const [memberAppFile, setMemberAppFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const isAppSubmitted = societyMembership?.status === "application_submitted";
@@ -65,7 +65,7 @@ export default function MembershipApplicationDialog({ open, onOpenChange }: Memb
     ensureMemberPath();
     setSubmitting(true);
     try {
-      const ok = await submitMembershipApplication(memberAppFile.dataUrl, memberAppFile.name);
+      const ok = await submitMembershipApplication(memberAppFile);
       if (ok) {
         setMemberAppFile(null);
         setStep(0);
@@ -175,14 +175,14 @@ export default function MembershipApplicationDialog({ open, onOpenChange }: Memb
           {!isAppSubmitted && !isAppApproved && step === 2 && (
             <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-xs text-blue-800">
-                <p className="font-bold mb-1">Step 2/2：上传入会申请书</p>
-                <p className="text-blue-700">请上传填写完整的入会申请书（.doc/.docx/.pdf）。</p>
+                <p className="font-bold mb-1">Step 2/2：上传入会申请书 <span className="text-red-600">【必填】</span></p>
+                <p className="text-blue-700">请上传填写完整的电子版入会申请书（.doc/.docx/.pdf）。审核通过后方可缴纳会费。</p>
               </div>
               <div
                 onClick={() => {
-                  pickAndReadFile(".doc,.docx,.pdf", 10, (file) => {
+                  pickFile(".doc,.docx,.pdf", 20, (file) => {
                     setMemberAppFile(file);
-                    toast.success("入会申请书上传成功！");
+                    toast.success("入会申请书已选择");
                   });
                 }}
                 className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${memberAppFile ? "border-green-500 bg-green-50/20" : "border-slate-300 hover:bg-slate-50 hover:border-[#002B49]"}`}
