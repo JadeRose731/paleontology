@@ -1,6 +1,6 @@
 # paleontology-cms-backend
 
-中国古生物学会 **轻量 CMS 后端**，API 契约与 `PaleontologicalResearch` 生产栈对齐，为 `paleontology-admin-latest` 与 `paleontology-website-latest` 提供内容、栏目编排与媒体存储。
+中国古生物学会 **轻量 CMS + 会员业务后端**，API 契约与 `PaleontologicalResearch` 生产栈对齐，为 `paleontology-admin-latest` 与 `paleontology-website-latest` 提供内容、栏目、会员、会议、审计等能力。
 
 ## 技术栈
 
@@ -9,9 +9,9 @@
 | Java | 8（字节码目标；可用 JDK 17 编译） |
 | Spring Boot | 2.5.15 |
 | MyBatis-Plus | 3.4.3 |
-| Flyway | 数据库迁移 |
+| Flyway | 数据库迁移（V1–V32） |
 | MySQL | 5.7+ |
-| Redis | 可选（JWT 黑名单；默认已 exclude） |
+| Redis | 可选（JWT 黑名单；默认 exclude） |
 | Knife4j | 3.0.3 |
 
 ## 快速启动
@@ -34,7 +34,7 @@ spring:
     password: 你的密码
 ```
 
-> 默认 `application-dev.yml` 已 exclude Redis 自动配置，无 Redis 亦可运行。
+> 默认已 exclude Redis 自动配置，无 Redis 亦可运行。
 
 ### 3. 启动
 
@@ -43,226 +43,268 @@ cd paleontology-cms-backend
 mvn spring-boot:run
 ```
 
-- 服务地址：`http://localhost:8089`
-- API 文档：`http://localhost:8089/doc.html`
-- 默认账号：`admin` / `admin123`
-- 上传目录：`${user.home}/paleo-cms/uploads`（可通过 `cms.upload.base-dir` 修改）
-- 上传 URL 前缀：`/uploads`（静态资源映射）
+| 项 | 值 |
+|----|-----|
+| 服务地址 | `http://localhost:8089` |
+| API 文档 | `http://localhost:8089/doc.html` |
+| 管理端登录 | `admin` / `admin123`（兼容）或邮箱账号见 V23 |
+| 上传目录 | `${user.home}/paleo-cms/uploads` |
+| 静态资源 | `/uploads/**` |
 
-Flyway 启动时自动执行 `src/main/resources/db/migration/V1`–`V11` 迁移脚本（建表 + 种子数据 + 栏目/版式注册）。
+Flyway 启动时自动执行 `db/migration/V1`–`V32`。
 
-### IntelliJ IDEA 编译提示「源发行版 17 需要目标发行版 17」
+### IntelliJ 编译提示
 
-本仓库 **字节码目标为 Java 8**。若 IDE 报错：
+本仓库字节码目标为 **Java 8**。若 IDE 报「源发行版 17」：Project language level 设为 8，Maven Reload，`mvn clean compile`。
 
-1. **Maven 重新加载**：右键 `pom.xml` → Maven → Reload Project
-2. **Project Structure** → Project language level：**8**
-3. **Settings → Compiler → Java Compiler** → Project bytecode version：**8**
-4. **Build → Rebuild Project**
+---
 
-命令行验证：`mvn clean compile`
-
-## API 概览
-
-响应格式与 RuoYi / PaleontologicalResearch 一致：
+## 响应格式
 
 ```json
 { "code": 200, "msg": "操作成功", "data": ... }
 ```
 
-分页列表：
+分页：
 
 ```json
 { "code": 200, "msg": "查询成功", "rows": [...], "total": 100 }
 ```
 
-### 认证
+鉴权：`Authorization: Bearer <token>`
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|------|------|------|------|
-| POST | `/login` | 匿名 | **管理端**登录，返回 JWT |
-| GET | `/getInfo` | JWT | 当前管理员信息（role、branchId） |
-| POST | `/paleo/auth/register` | 匿名 | **网站用户**注册 |
-| POST | `/paleo/auth/login` | 匿名 | **网站用户**登录 |
-| GET | `/paleo/auth/info` | JWT | 当前用户 + 会员档案 |
-| PUT | `/paleo/auth/profile` | JWT | 更新个人资料 |
-| PUT | `/paleo/auth/user-type` | JWT | 更新会员路径（regular/non_member/member） |
+---
 
-```http
-POST /login
-Content-Type: application/json
+## API 概览
 
-{"username":"admin","password":"admin123"}
-```
+### 管理端认证
 
-网站用户登录：
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/login` | 管理员登录（邮箱/用户名 + 密码）→ JWT |
+| GET | `/getInfo` | 当前管理员（role、branchId） |
 
-```http
-POST /paleo/auth/login
-Content-Type: application/json
+### 网站用户认证 `/paleo/auth`
 
-{"email":"demo@paleontology.org.cn","password":"demo123"}
-```
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/paleo/auth/register` | 用户注册 → JWT |
+| POST | `/paleo/auth/login` | 用户登录 |
+| GET | `/paleo/auth/info` | 当前用户 + 档案 + **`membershipStatus`** |
+| PUT | `/paleo/auth/profile` | 更新资料 |
+| PUT | `/paleo/auth/user-type` | 更新会员路径（regular / non_member / member） |
 
-演示账号（启动时自动创建）：
+演示网站用户（`DemoUserInitializer`）：
 
 | 邮箱 | 密码 |
 |------|------|
 | `demo@paleontology.org.cn` | `demo123` |
 
-后续请求：
+### CMS 内容 `/paleo/cms`
 
-```http
-Authorization: Bearer <token>
-```
+管理端 CRUD、媒体上传、发布/下架；公开接口 `/paleo/cms/public/list`、`/public/{entryId}`。
 
-### CMS 内容条目 `/paleo/cms`
+### CMS 栏目 `/paleo/cms-channels`
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|------|------|------|------|
-| GET | `/paleo/cms/list` | JWT | 管理端分页列表 |
-| GET | `/paleo/cms/{entryId}` | JWT | 管理端详情 |
-| GET | `/paleo/cms/public/list` | 匿名 | 公开已发布列表 |
-| GET | `/paleo/cms/public/{entryId}` | 匿名 | 公开详情 |
-| POST | `/paleo/cms` | JWT | 新增 |
-| PUT | `/paleo/cms` | JWT | 修改 |
-| POST | `/paleo/cms/media/upload` | JWT | 媒体上传（本地存储） |
-| POST | `/paleo/cms/{entryId}/status` | JWT | 发布/下架 |
-| POST | `/paleo/cms/{entryId}/delete` | JWT | 逻辑删除 |
+| 公开接口 | 说明 |
+|----------|------|
+| `GET /public/list` | 导航列表 |
+| `GET /public/resolve?routePath=` | 页面一站式解析（栏目+区块+内容） |
+| `GET /public/detail` | 按 routePath/channelCode 取详情 |
 
-### CMS 栏目编排 `/paleo/cms-channels`
+### CMS 版式 `/paleo/cms-layouts`
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|------|------|------|------|
-| GET | `/paleo/cms-channels/tree` | JWT | 管理端栏目树 |
-| GET | `/paleo/cms-channels/list` | JWT | 管理端分页列表 |
-| GET | `/paleo/cms-channels/{channelId}` | JWT | 栏目详情 |
-| GET | `/paleo/cms-channels/public/list` | 匿名 | 公开导航列表 |
-| GET | `/paleo/cms-channels/public/detail` | 匿名 | 按 routePath/channelCode 取栏目+区块 |
-| GET | `/paleo/cms-channels/public/resolve` | 匿名 | **页面一站式解析**（栏目+区块+内容+子栏目） |
-| POST/PUT | `/paleo/cms-channels` | JWT | 新增/修改栏目 |
-| POST | `/paleo/cms-channels/{channelId}/status` | JWT | 发布/下架 |
-| POST | `/paleo/cms-channels/{channelId}/delete` | JWT | 逻辑删除 |
-| GET/POST | `/paleo/cms-channels/{channelId}/blocks` | JWT | 区块列表/新增 |
-| POST | `/paleo/cms-channels/blocks/{blockId}/delete` | JWT | 删除区块 |
+公开列表与 schema；管理端维护 `layoutType` 注册表。
 
-### CMS 版式注册表 `/paleo/cms-layouts`
+### 会员业务 `/paleo/membership`
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|------|------|------|------|
-| GET | `/paleo/cms-layouts/list` | JWT | 管理端版式列表 |
-| GET | `/paleo/cms-layouts/public/list` | 匿名 | 公开版式列表 |
-| GET | `/paleo/cms-layouts/public/{layoutCode}` | 匿名 | 版式详情含 schemaJson |
+| 分类 | 路径（节选） | 说明 |
+|------|-------------|------|
+| 档案 | `/profiles/mine`、`/profiles/list` | 会员档案 |
+| 申请 | `/applications/mine`、`/applications/{id}/review` | 入会/退会申请 |
+| 缴费 | `/payments/mine`、`/payments/{id}/review` | 两阶段会员费 |
+| 文件 | `/applications/mine/{id}/file`、`/payments/mine/{id}/files/{role}` | 申请书、凭证、发票 |
+| 管理目录 | **`GET /admin/directory`** | 会员用户名录（含 `membershipStatus`） |
+| 模板 | `/templates/public` | 入会/退会申请书模板 |
+
+### 会议 `/paleo/conferences`
+
+| 路径 | 说明 |
+|------|------|
+| `GET /public/list` | 开放会议列表 |
+| `GET /registrations/mine` | 我的报名 |
+| `POST /registrations/mine` | 创建报名 |
+| `POST /registrations/mine/{id}/files/{role}` | 上传凭证/发票 |
+| `POST /registrations/{id}/review` | 管理端审核 |
+| `GET /registrations/reviews/pending-vouchers` | 待审凭证 |
+| `GET /registrations/reviews/pending-invoices` | 待审发票 |
+
+### 分会绑定 `/paleo/user-bindings`
+
+`GET/POST /mine/bind`、`/mine/unbind` — 用户绑定/解绑专业分会。
+
+### 审计 `/paleo/audit`
+
+| 路径 | 说明 |
+|------|------|
+| `GET /logs` | 分页查询审计日志（中文摘要、用户详情 JSON） |
+| `GET /actions` | 可筛选的操作类型列表 |
+
+审核通过/驳回时由 `AuditLogService` 自动写入；详情面向客户展示（姓名、邮箱、中文状态变更）。
 
 ### 仪表盘 `/paleo/dashboard`
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|------|------|------|------|
-| GET | `/paleo/dashboard/stats` | JWT | 综合统计（用户数、会员数、内容数等） |
+`GET /stats` — 综合统计：
 
-### 会员业务 `/paleo/membership`（Phase 1 ✅）
+| 字段 | 含义 |
+|------|------|
+| `memberCount` | **正式会员**（仅 `active`） |
+| `activeMembers` | 同 `memberCount` |
+| `pendingMembershipCount` | 入会办理中（申请/缴费/发票流水线） |
+| `nonMemberCount` | 非会员及其他 |
+| `studentMembers` / `nonStudentMembers` | 仅正式会员分层 |
+| `branchMemberCounts` | 各分会**正式会员**绑定数 |
+| `totalMembershipFee` | 已确认（CONFIRMED）会员费合计 |
 
-| 方法 | 路径 | 鉴权 | 说明 |
-|------|------|------|------|
-| GET | `/paleo/membership/profiles/list` | JWT | 管理端会员档案列表 |
-| GET | `/paleo/membership/profiles/mine` | JWT | 我的会员档案 |
-| PUT | `/paleo/membership/profiles/mine` | JWT | 更新我的会员类别 |
-| GET | `/paleo/membership/applications/list` | JWT | 管理端入会/退会申请 |
-| GET | `/paleo/membership/applications/mine` | JWT | 我的申请列表 |
-| POST | `/paleo/membership/applications/mine` | JWT | 提交入会/退会申请 |
-| POST | `/paleo/membership/applications/{id}/review` | JWT | 管理端审核申请 |
-| POST | `/paleo/membership/applications/mine/{id}/file` | JWT | 上传申请书 |
-| GET | `/paleo/membership/payments/list` | JWT | 管理端会员费列表 |
-| GET | `/paleo/membership/payments/mine` | JWT | 我的会员费记录 |
-| POST | `/paleo/membership/payments/mine` | JWT | 提交会员费 |
-| POST | `/paleo/membership/payments/{id}/review` | JWT | 管理端审核会员费 |
-| POST | `/paleo/membership/payments/mine/{id}/files/{role}` | JWT | 上传凭证/发票（`voucher`/`invoice`） |
-| GET | `/paleo/membership/payments/stats` | JWT | 会员费统计 |
+状态解析：`PaleoMembershipStatusService`（与管理端、前台 `resolveMembershipStatusFromApi` 对齐）。
+
+### 识别 `/paleo/recognition`
+
+化石识别结果上传与人工复核（可选模块）。
+
+### 管理端分会 `/paleo/admin/associations`
+
+管理员与学会的绑定关系。
+
+---
+
+## 正式会员认定
+
+须完成全流程后 `paleo_member_profile.member_status = ACTIVE` 且最近一笔会员费 `payment_status = CONFIRMED`：
+
+```
+入会申请 APPROVED → 凭证审核通过 → 发票审核通过 → 正式会员 (active)
+```
+
+中间状态（`PENDING` 档案、`application_approved`、`voucher_submitted`、`invoice_pending` 等）计入「入会办理中」，**不计入**正式会员统计。
+
+---
 
 ## 模块编码（moduleCode）
 
-与管理端 CMS 17 个子模块一致：
+与管理端 CMS 子模块一致：
 
 `banners` · `news` · `pages` · `personnel` · `awards` · `announcements` · `timeline` · `gallery` · `international` · `downloads` · `regulations` · `science` · `tech-rewards` · `party` · `branch` · `media` · `settings` · `publish` · `public-files`
 
-## 数据库迁移
+---
 
-| 版本 | 说明 |
-|------|------|
-| V1 | 初始化 schema（CMS 条目/栏目/区块/管理员） |
-| V2–V3 | 种子内容与扩展 |
-| V4 | URL 列加宽 |
-| V5–V6 | 管理端栏目字段、菜单子项 |
-| V7 | 学会资料下载种子 |
-| V8 | 版式注册表 |
-| V9–V10 | 导航名称修复、简介区块种子 |
-| V11 | 会员/会议相关表（基础结构 + 演示种子） |
-| V12 | 网站用户表、入会/退会申请表、会员档案/缴费字段扩展 |
+## 数据库迁移（Flyway）
 
-> **Flyway 迁移失败恢复**：若 V12 曾中途失败，需先清理失败记录再重启：
-> ```sql
-> DELETE FROM flyway_schema_history WHERE version = '12' AND success = 0;
-> ```
-> 然后重新启动应用。`paleo_user` 等已创建的表会由 `CREATE TABLE IF NOT EXISTS` 安全跳过。
+| 版本段 | 主要内容 |
+|--------|----------|
+| V1–V10 | CMS 表结构、种子内容、版式注册、导航修复 |
+| V11–V12 | 会议/会员基础表、网站用户表 |
+| V13–V16 | 科学传播、学会服务 Tab 栏目 |
+| V17–V22 | 会议报名缴费、演示会议码、管理员账号、分会 code |
+| V23–V26 | 管理端账号种子、识别、审计表、退会清理 |
+| V27–V32 | 下载合并、简介/组织机构同步、服务路由统一、导航顺序 |
 
-## 前端对接（已集成）
+> **迁移失败恢复**：清理 `flyway_schema_history` 中 `success=0` 的记录后重启。
 
-### paleontology-admin-latest
+---
 
-`vite.config.ts` 已配置代理：
+## 前端对接
+
+### paleontology-admin-latest（端口 3001）
 
 ```ts
-server: {
-  port: 3001,
-  proxy: {
-    '/paleo': { target: 'http://localhost:8089', changeOrigin: true },
-    '/login': { target: 'http://localhost:8089', changeOrigin: true },
-    '/getInfo': { target: 'http://localhost:8089', changeOrigin: true },
-    '/uploads': { target: 'http://localhost:8089', changeOrigin: true },
-  },
+proxy: {
+  '/paleo': 'http://localhost:8089',
+  '/login': 'http://localhost:8089',
+  '/getInfo': 'http://localhost:8089',
+  '/uploads': 'http://localhost:8089',
 }
 ```
 
-- `lib/cms-api.ts` — REST 客户端
-- `pages/admin/cms/cms-data.ts` — `fetchCmsDatabase()` / `saveCmsDatabase()` 经 API 读写
-- `pages/admin/cms/ChannelManagement.tsx` — 栏目编排
-- 登录成功后自动获取 CMS JWT（`admin` / `admin123`）
+- CMS：`lib/cms-api.ts`
+- 会员审核/目录：`lib/membership-api.ts`
+- 审计：`lib/audit-api.ts`
 
-### paleontology-website-latest
-
-`vite.config.ts` 已配置代理：
+### paleontology-website-latest（端口 3000）
 
 ```ts
-server: {
-  port: 3000,
-  proxy: {
-    '/paleo': { target: 'http://localhost:8089', changeOrigin: true },
-    '/uploads': { target: 'http://localhost:8089', changeOrigin: true },
-  },
+proxy: {
+  '/paleo': 'http://localhost:8089',
+  '/uploads': 'http://localhost:8089',
 }
 ```
 
-- 顶栏/党建侧栏导航：`/paleo/cms-channels/public/list`
-- 通用页面渲染：`/paleo/cms-channels/public/resolve?routePath=...`
-- 首页轮播/新闻：`/paleo/cms/public/list?moduleCode=...`
-- 会员/会议业务仍使用前端 `localStorage`（尚未对接 V11 业务表）
+- CMS 导航与页面：`lib/cms-api.ts`
+- 会员/会议/绑定：`lib/membership-api.ts`（JWT：`paleo_user_token`）
 
-生产部署可通过 `VITE_CMS_API_BASE` 指定 API 根路径（默认空字符串，走同源代理）。
+生产环境可通过 `VITE_CMS_API_BASE` 指定 API 根路径。
 
-## 与 PaleontologicalResearch 的差异
+---
+
+## 功能模块与数据域
+
+后端按领域划分 API；下表说明各模块职责及主要表/服务。
+
+### 领域一览
+
+| 领域 | API 前缀 | 核心表/服务 | 说明 |
+|------|----------|-------------|------|
+| **管理端认证** | `/login`、`/getInfo` | `cms_admin_user` | 管理员 JWT、角色（总/分会/财务） |
+| **网站用户** | `/paleo/auth` | `paleo_user`、`paleo_member_profile` | 注册登录、会员路径、档案与 `membershipStatus` |
+| **CMS 内容** | `/paleo/cms` | `paleo_cms_entry` | 各 moduleCode 条目，发布/下架 |
+| **CMS 栏目** | `/paleo/cms-channels` | `paleo_cms_channel`、`paleo_cms_block` | 顶栏导航、页面解析、区块 |
+| **CMS 版式** | `/paleo/cms-layouts` | `paleo_cms_layout` | timeline、gallery、list 等版式注册 |
+| **会员申请** | `/paleo/membership/applications` | `paleo_membership_application` | 入会/退会申请书提交与审核 |
+| **会员缴费** | `/paleo/membership/payments` | `paleo_membership_payment` | 会费两阶段（凭证→发票→确认） |
+| **会员名录** | `/paleo/membership/admin/directory` | 多表聚合 | 管理端用户列表与 `membershipStatus` |
+| **会议** | `/paleo/conferences` | `paleo_conference`、`paleo_conference_registration` | 开放会议列表、报名与两阶段缴费 |
+| **分会绑定** | `/paleo/user-bindings` | `paleo_user_binding` | 用户绑定/解绑专业分会 |
+| **审计** | `/paleo/audit` | `paleo_audit_log` | 审核操作自动落库，中文详情 |
+| **仪表盘** | `/paleo/dashboard` | `PaleoDashboardService` | 正式会员/办理中/会费统计 |
+| **状态解析** | — | `PaleoMembershipStatusService` | 统一计算 `active` 与流水线状态 |
+| **识别** | `/paleo/recognition` | `paleo_recognition_result` | 化石识别与人工复核（可选） |
+
+### 会员状态机（与前后台一致）
+
+```
+尚未入会 → 申请审核中 → 申请已通过 → 凭证审核中 → 待上传发票 → 发票审核中 → 正式会员(active)
+                ↓              ↓              ↓
+            申请驳回        凭证驳回        发票驳回
+```
+
+仅 `active` 计入正式会员统计；中间状态为「入会办理中」。
+
+### CMS moduleCode 与前台路由
+
+见 [网站 README](../paleontology-website-latest/README.md#功能模块说明)、[客户需求说明](../docs/2026-07-06-客户需求说明-基于当前实现.md) 与 [管理端 cms-nav.ts](../paleontology-admin-latest/client/src/pages/admin/cms/cms-nav.ts)。
+
+---
+
+## 与 PaleontologicalResearch 生产栈的差异
 
 | 项 | 本后端 | 生产栈 |
 |----|--------|--------|
 | 框架 | 轻量 Spring Boot | RuoYi 全家桶 |
-| 鉴权 | 简易 JWT | RuoYi JWT + 菜单权限 |
-| 文件存储 | 本地 `${user.home}/paleo-cms/uploads` | 阿里云 OSS |
-| 分会隔离 | 基础 role + branchId 判断 | PaleoAdminAssociationService |
-| Channel/Block/Layout | **已实现** | 生产栈文档有、部分代码缺失 |
-| 会员/会议业务 | **Phase 1 用户/会员 API 已实现**；会议/报名 API 待 Phase 2 | 完整业务模块 |
+| 鉴权 | JWT + 角色注解 | RuoYi 菜单权限 |
+| 文件存储 | 本地磁盘 | 阿里云 OSS |
+| Channel/Block/Layout | ✅ 已实现 | 部分缺失 |
+| 会员/会议/审计 | ✅ Phase 1–2 已实现 | 完整业务模块 |
+| 管理端会议 CRUD | 前台 localStorage 为主 | 全 API |
 
 ## 后续工作
 
-1. **Phase 2**：会议 CRUD、报名、分会绑定 API（`/paleo/conferences`、`/paleo/registrations`、`/paleo/user-bindings`）
-2. 改造 `paleontology-website-latest` / `paleontology-admin-latest` 的 `MembershipContext` / `AdminContext`，替换 localStorage
-3. 可选：对接 PaleontologicalResearch 生产库做数据迁移
-4. 生产环境：OSS 存储、Redis JWT 黑名单、JWT secret 轮换
+1. 管理端会议 CRUD 迁移至 API，去除 localStorage 双写
+2. 前台 `AdminContext` / 统计完全 API 化
+3. 可选：对接生产库数据迁移
+4. 生产：OSS 存储、Redis JWT 黑名单、密钥轮换
+
+---
+
+## License
+
+MIT
