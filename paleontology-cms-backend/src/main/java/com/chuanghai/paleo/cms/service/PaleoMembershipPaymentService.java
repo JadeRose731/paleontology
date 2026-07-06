@@ -25,6 +25,19 @@ public class PaleoMembershipPaymentService extends ServiceImpl<PaleoMembershipPa
     @Autowired
     private PaleoRecognitionService recognitionService;
 
+    /** 退会时作废历史缴费记录，避免重新入会沿用旧 CONFIRMED 状态 */
+    public void voidPaymentsOnWithdraw(Long userId, String operator) {
+        List<PaleoMembershipPayment> payments = list(new LambdaQueryWrapper<PaleoMembershipPayment>()
+                .eq(PaleoMembershipPayment::getUserId, userId)
+                .ne(PaleoMembershipPayment::getPaymentStatus, "VOIDED")
+                .ne(PaleoMembershipPayment::getPaymentStatus, "UNPAID"));
+        for (PaleoMembershipPayment payment : payments) {
+            payment.setPaymentStatus("VOIDED");
+            payment.setUpdateBy(operator);
+            updateById(payment);
+        }
+    }
+
     public boolean attachFile(Long paymentId, String fileRole, String fileUrl, String operator) {
         PaleoMembershipPayment payment = getById(paymentId);
         if (payment == null) {

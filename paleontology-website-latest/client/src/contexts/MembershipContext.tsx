@@ -64,6 +64,25 @@ function addWorkdays(dateStr: string, workdays: number): string {
   return d.toISOString().split("T")[0];
 }
 
+/** 申请审核/提交时间，用于判断退会 vs 重新入会孰新 */
+function applicationEventTime(app?: { reviewTime?: string; createTime?: string }): number {
+  const raw = app?.reviewTime || app?.createTime;
+  if (!raw) return 0;
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+/** 已批准的退会是否仍应覆盖当前会员状态（重新入会且更新时返回 false） */
+function withdrawalStillAuthoritative(
+  joinApps: { reviewStatus?: string; reviewTime?: string; createTime?: string }[],
+  withdrawApp?: { reviewStatus?: string; reviewTime?: string; createTime?: string } | null,
+): boolean {
+  if (!withdrawApp || withdrawApp.reviewStatus !== "APPROVED") return false;
+  const approvedJoin = joinApps.find((app) => app.reviewStatus === "APPROVED");
+  if (!approvedJoin) return true;
+  return applicationEventTime(withdrawApp) > applicationEventTime(approvedJoin);
+}
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -524,7 +543,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       getUserToken() ? fetchMyBranchBindings().catch(() => [] as string[]) : Promise.resolve([] as string[]),
     ]);
 
-    const latestPayment = payments[0];
+    const latestPayment = payments.find((p) => (p.paymentStatus || "").toUpperCase() !== "VOIDED");
     const paymentStatus = latestPayment ? mapApiPaymentStatus(latestPayment.paymentStatus) : undefined;
     const pendingJoin = joinApps.find((app) => app.reviewStatus === "PENDING");
     const latestJoin = pendingJoin ?? joinApps.find((app) => app.reviewStatus === "APPROVED") ?? joinApps[0];
@@ -536,6 +555,8 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const paymentActive = latestPayment && paymentStatus && paymentStatus !== "unpaid";
     const paymentInProgress = paymentActive && paymentStatus !== "confirmed";
+
+    const profileIsActive = resolvedProfile?.memberStatus === "ACTIVE";
 
     if (pendingJoin) {
       const appStatus = mapApiApplicationReviewStatus(pendingJoin.reviewStatus, "JOIN");
@@ -591,8 +612,8 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         expiryDate: undefined,
         history: [record],
       };
-    } else if ((paymentActive && paymentStatus === "confirmed") || resolvedProfile?.memberStatus === "ACTIVE") {
-      const record: PaymentRecord | null = latestPayment && paymentStatus === "confirmed"
+    } else if (profileIsActive && paymentActive && paymentStatus === "confirmed") {
+      const record: PaymentRecord | null = latestPayment
         ? {
             id: `rec-s-${latestPayment.paymentId}`,
             type: "society_fee",
@@ -652,16 +673,18 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         expiryDate: resolvedProfile.validEndDate || membership.expiryDate,
         history: membership.history,
       };
-    } else if (resolvedProfile?.memberStatus === "WITHDRAWN") {
+    } else if (resolvedProfile?.memberStatus === "WITHDRAWN" && withdrawalStillAuthoritative(joinApps, latestWithdraw)) {
       membership = { ...membership, status: "withdrawn", history: membership.history };
     }
 
     if (latestWithdraw && !pendingWithdraw) {
       const wdStatus = mapApiApplicationReviewStatus(latestWithdraw.reviewStatus, "WITHDRAW");
-      if (wdStatus === "withdrawal_submitted") {
-        membership = { ...membership, status: "withdrawal_submitted", history: membership.history };
-      } else if (wdStatus === "withdrawn") {
-        membership = { ...membership, status: "withdrawn", history: membership.history };
+      if (withdrawalStillAuthoritative(joinApps, latestWithdraw)) {
+        if (wdStatus === "withdrawal_submitted") {
+          membership = { ...membership, status: "withdrawal_submitted", history: membership.history };
+        } else if (wdStatus === "withdrawn") {
+          membership = { ...membership, status: "withdrawn", history: membership.history };
+        }
       }
       nextWithdrawalApp = {
         applicationId: latestWithdraw.applicationId,
@@ -718,6 +741,9 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const authInfo = await fetchAuthInfo();
         let apiUserType = (authInfo.user.userType as UserType) || "regular";
         if (membership.status === "active" && apiUserType !== "member") {
+          await updateUserTypeApi("member", true);
+          apiUserType = "member";
+        } else if (membership.status === "application_approved" && apiUserType !== "member") {
           await updateUserTypeApi("member", true);
           apiUserType = "member";
         } else if (

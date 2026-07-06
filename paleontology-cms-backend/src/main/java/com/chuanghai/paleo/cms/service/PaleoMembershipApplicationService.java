@@ -17,6 +17,9 @@ public class PaleoMembershipApplicationService extends ServiceImpl<PaleoMembersh
     @Autowired
     private PaleoMemberProfileService memberProfileService;
 
+    @Autowired
+    private PaleoMembershipPaymentService membershipPaymentService;
+
     public boolean review(Long applicationId, String reviewStatus, String reviewComment, String reviewer) {
         PaleoMembershipApplication application = getById(applicationId);
         if (application == null) {
@@ -34,6 +37,7 @@ public class PaleoMembershipApplicationService extends ServiceImpl<PaleoMembersh
         if (updated && "APPROVED".equals(reviewStatus)) {
             if ("WITHDRAW".equals(application.getApplicationType())) {
                 memberProfileService.withdrawByApplication(application, reviewer);
+                membershipPaymentService.voidPaymentsOnWithdraw(application.getUserId(), reviewer);
             } else {
                 memberProfileService.markPendingApplication(application, reviewer);
             }

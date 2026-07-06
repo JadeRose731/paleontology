@@ -88,6 +88,7 @@ export function mapApiPaymentStatus(status?: string): string {
     INVOICE_REVIEW: "invoice_submitted",
     INVOICE_REJECTED: "invoice_rejected",
     CONFIRMED: "confirmed",
+    VOIDED: "voided",
     PENDING: "unpaid",
   };
   return status ? (map[status] || status.toLowerCase()) : "unpaid";

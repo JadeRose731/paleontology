@@ -58,6 +58,9 @@ public class PaleoMemberProfileService extends ServiceImpl<PaleoMemberProfileMap
     public void withdrawByApplication(PaleoMembershipApplication application, String operator) {
         PaleoMemberProfile profile = getOrCreate(application.getUserId(), operator);
         profile.setMemberStatus("WITHDRAWN");
+        profile.setValidStartDate(null);
+        profile.setValidEndDate(null);
+        profile.setLatestPaymentId(null);
         profile.setLatestApplicationId(application.getApplicationId());
         profile.setUpdateBy(operator);
         updateById(profile);
@@ -66,8 +69,13 @@ public class PaleoMemberProfileService extends ServiceImpl<PaleoMemberProfileMap
 
     public void markPendingApplication(PaleoMembershipApplication application, String operator) {
         PaleoMemberProfile profile = getOrCreate(application.getUserId(), operator);
-        if (!"ACTIVE".equals(profile.getMemberStatus())) {
-            profile.setMemberStatus("PENDING");
+        String previousStatus = profile.getMemberStatus();
+        profile.setMemberStatus("PENDING");
+        if ("WITHDRAWN".equals(previousStatus) || "EXPIRED".equals(previousStatus)
+                || "NON_MEMBER".equals(previousStatus) || previousStatus == null) {
+            profile.setValidStartDate(null);
+            profile.setValidEndDate(null);
+            profile.setLatestPaymentId(null);
         }
         profile.setMemberCategory(application.getMemberCategory());
         profile.setLatestApplicationId(application.getApplicationId());

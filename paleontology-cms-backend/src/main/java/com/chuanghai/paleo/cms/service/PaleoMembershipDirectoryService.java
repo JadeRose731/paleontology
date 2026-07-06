@@ -65,6 +65,7 @@ public class PaleoMembershipDirectoryService {
         Map<Long, PaleoMembershipPayment> latestPaymentMap = new HashMap<>();
         for (PaleoMembershipPayment payment : paymentService.list(new LambdaQueryWrapper<PaleoMembershipPayment>()
                 .in(PaleoMembershipPayment::getUserId, userIds)
+                .ne(PaleoMembershipPayment::getPaymentStatus, "VOIDED")
                 .orderByDesc(PaleoMembershipPayment::getCreateTime))) {
             latestPaymentMap.putIfAbsent(payment.getUserId(), payment);
         }
@@ -126,8 +127,8 @@ public class PaleoMembershipDirectoryService {
                 }
             }
             PaleoMemberProfile profile = profileMap.get(userRow.getUserId());
-            PaleoMembershipPayment latestPayment = latestPaymentMap.get(user.getUserId());
-            PaleoMembershipApplication pendingJoin = pendingJoinMap.get(user.getUserId());
+            PaleoMembershipPayment latestPayment = latestPaymentMap.get(userRow.getUserId());
+            PaleoMembershipApplication pendingJoin = pendingJoinMap.get(userRow.getUserId());
 
             Map<String, Object> row = new HashMap<>();
             row.put("userId", userRow.getUserId());
@@ -156,6 +157,18 @@ public class PaleoMembershipDirectoryService {
         if (pendingJoin != null) {
             return "application_submitted";
         }
+        if (profile != null && profile.getMemberStatus() != null) {
+            switch (profile.getMemberStatus()) {
+                case "WITHDRAWN":
+                    return "withdrawn";
+                case "PENDING":
+                    return "application_approved";
+                case "EXPIRED":
+                    return "expired";
+                default:
+                    break;
+            }
+        }
         if (latestPayment != null && latestPayment.getPaymentStatus() != null) {
             switch (latestPayment.getPaymentStatus()) {
                 case "VOUCHER_REVIEW":
@@ -169,7 +182,10 @@ public class PaleoMembershipDirectoryService {
                 case "INVOICE_REJECTED":
                     return "invoice_rejected";
                 case "CONFIRMED":
-                    return "active";
+                    if (profile != null && "ACTIVE".equals(profile.getMemberStatus())) {
+                        return "active";
+                    }
+                    break;
                 default:
                     break;
             }
@@ -178,12 +194,6 @@ public class PaleoMembershipDirectoryService {
             switch (profile.getMemberStatus()) {
                 case "ACTIVE":
                     return "active";
-                case "PENDING":
-                    return "application_approved";
-                case "WITHDRAWN":
-                    return "withdrawn";
-                case "EXPIRED":
-                    return "expired";
                 case "NON_MEMBER":
                 default:
                     return "not_member";
