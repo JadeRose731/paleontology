@@ -66,15 +66,15 @@ public class PaleoDashboardService {
                 .collect(Collectors.toSet());
 
         long totalUsers = directory.size();
-        long memberCount = directory.stream()
-                .filter(row -> "member".equals(String.valueOf(row.get("userType"))))
+        long formalMemberCount = directory.stream()
+                .filter(row -> "active".equals(String.valueOf(row.get("membershipStatus"))))
+                .count();
+        long pendingMembershipCount = directory.stream()
+                .filter(row -> isPipelineMembershipStatus(String.valueOf(row.get("membershipStatus"))))
                 .count();
         long nonMemberCount = directory.stream()
-                .filter(row -> "non_member".equals(String.valueOf(row.get("userType"))))
-                .count();
-        long activeMembers = directory.stream()
-                .filter(row -> "member".equals(String.valueOf(row.get("userType")))
-                        && "active".equals(String.valueOf(row.get("membershipStatus"))))
+                .filter(row -> !"active".equals(String.valueOf(row.get("membershipStatus")))
+                        && !isPipelineMembershipStatus(String.valueOf(row.get("membershipStatus"))))
                 .count();
 
         long studentMembers = 0;
@@ -84,16 +84,15 @@ public class PaleoDashboardService {
 
         for (Map<String, Object> row : directory) {
             boolean isStudent = "学生".equals(String.valueOf(row.get("roleLabel")));
-            String userType = String.valueOf(row.get("userType"));
             String membershipStatus = String.valueOf(row.get("membershipStatus"));
 
-            if ("member".equals(userType) && "active".equals(membershipStatus)) {
+            if ("active".equals(membershipStatus)) {
                 if (isStudent) {
                     studentMembers++;
                 } else {
                     nonStudentMembers++;
                 }
-            } else if ("non_member".equals(userType)) {
+            } else if (!isPipelineMembershipStatus(membershipStatus)) {
                 if (isStudent) {
                     studentNonMembers++;
                 } else {
@@ -103,9 +102,10 @@ public class PaleoDashboardService {
         }
 
         result.put("totalUsers", totalUsers);
-        result.put("memberCount", memberCount);
+        result.put("memberCount", formalMemberCount);
         result.put("nonMemberCount", nonMemberCount);
-        result.put("activeMembers", activeMembers);
+        result.put("activeMembers", formalMemberCount);
+        result.put("pendingMembershipCount", pendingMembershipCount);
         result.put("studentMembers", studentMembers);
         result.put("nonStudentMembers", nonStudentMembers);
         result.put("studentNonMembers", studentNonMembers);
@@ -180,10 +180,16 @@ public class PaleoDashboardService {
                     .collect(Collectors.toList());
         }
 
+        Set<Long> formalMemberUserIds = directory.stream()
+                .filter(row -> "active".equals(String.valueOf(row.get("membershipStatus"))))
+                .map(row -> ((Number) row.get("userId")).longValue())
+                .collect(Collectors.toSet());
+
         List<Map<String, Object>> branchMemberCounts = new ArrayList<>();
         for (PaleoAssociation assoc : associations) {
             long count = bindings.stream()
                     .filter(b -> assoc.getAssociationId().equals(b.getAssociationId()))
+                    .filter(b -> formalMemberUserIds.contains(b.getUserId()))
                     .count();
             Map<String, Object> item = new HashMap<>();
             item.put("name", assoc.getAssociationName());
@@ -209,5 +215,25 @@ public class PaleoDashboardService {
         result.put("pendingReviews", pendingPayments);
 
         return result;
+    }
+
+    private boolean isPipelineMembershipStatus(String membershipStatus) {
+        if (membershipStatus == null) {
+            return false;
+        }
+        switch (membershipStatus) {
+            case "application_submitted":
+            case "application_rejected":
+            case "application_approved":
+            case "voucher_submitted":
+            case "voucher_rejected":
+            case "invoice_pending":
+            case "invoice_overdue":
+            case "invoice_submitted":
+            case "invoice_rejected":
+                return true;
+            default:
+                return false;
+        }
     }
 }

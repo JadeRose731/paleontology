@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Filter, Eye, UserPlus, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
-import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, CONFERENCE_STATUS_LABEL, CONFERENCE_STATUS_COLOR, BRANCH_MAP, getMemberCategoryLabel, getUserTypeLabel, formatBoundBranchLabel } from "@shared/constants";
+import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, CONFERENCE_STATUS_LABEL, CONFERENCE_STATUS_COLOR, BRANCH_MAP, getMemberCategoryLabel, getUserTypeLabel, formatBoundBranchLabel, isFormalMemberStatus } from "@shared/constants";
 import { FilePreviewDialog } from "@/components/FilePreviewDialog";
 import { fetchUserMembershipPayments, filterVisibleMembershipPayments, mapApiPaymentStatus, type ApiMembershipPaymentRow } from "@/lib/membership-api";
 
@@ -21,12 +21,8 @@ const SENTINEL_ALL = "__all__";
 
 const STATUS_OPTIONS = [
   { value: SENTINEL_ALL, label: "全部状态" },
-  ...Object.entries(MEMBERSHIP_STATUS)
-    .filter(([, val]) => val !== MEMBERSHIP_STATUS.NOT_MEMBER)
-    .map(([key, val]) => ({
-      value: val,
-      label: MEMBERSHIP_STATUS_LABEL[val] || key,
-    })),
+  { value: MEMBERSHIP_STATUS.ACTIVE, label: MEMBERSHIP_STATUS_LABEL.active },
+  { value: MEMBERSHIP_STATUS.EXPIRED, label: MEMBERSHIP_STATUS_LABEL.expired },
 ];
 
 const BRANCH_OPTIONS = [
@@ -346,8 +342,7 @@ export default function MemberManagement() {
 
   const members = useMemo(() => {
     const all = getAllMembers(filters);
-    // Always exclude non-members — they are managed on the NonMemberManagement page
-    return all.filter(m => m.membershipStatus !== MEMBERSHIP_STATUS.NOT_MEMBER);
+    return all.filter(m => isFormalMemberStatus(m.membershipStatus));
   }, [getAllMembers, filters]);
 
   const totalPages = Math.max(1, Math.ceil(members.length / ITEMS_PER_PAGE));
@@ -396,7 +391,7 @@ export default function MemberManagement() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-strata-blue-deep">会员用户管理</h1>
-        <p className="text-muted-foreground mt-1">管理已入会会员的缴费状态、会员资格和权限</p>
+        <p className="text-muted-foreground mt-1">管理已完成入会全流程（申请书、会费凭证、发票均通过）的正式会员</p>
       </div>
 
       <Card>

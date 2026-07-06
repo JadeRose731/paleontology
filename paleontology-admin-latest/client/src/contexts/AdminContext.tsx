@@ -46,6 +46,8 @@ import {
   resolveSocietyName,
   deriveFeeType,
   getFeeFromConfig,
+  isFormalMemberStatus,
+  isMembershipPipelineStatus,
   type UserType,
 } from "@shared/constants";
 
@@ -323,6 +325,7 @@ export interface DashboardStats {
   nonMemberCount: number;
   memberCount: number;
   activeMembers: number;
+  pendingMembershipCount: number;
   pendingReviews: number;
   activeConferences: number;
   recentReviews: ReviewItem[];
@@ -2712,22 +2715,25 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const invoices = pendingInvoiceReviews;
     const confs = getAllConferences();
     // Phase 1: 分会管理员只看本分会数据
+    const formalMembers = members.filter(m => isFormalMemberStatus(m.membershipStatus));
+    const pipelineMembers = members.filter(m => isMembershipPipelineStatus(m.membershipStatus));
+    const nonFormalMembers = members.filter(m =>
+      !isFormalMemberStatus(m.membershipStatus) && !isMembershipPipelineStatus(m.membershipStatus));
     const branchCounts = Object.entries(ALL_SOCIETY_UNITS)
       .filter(([id]) => adminRole !== "branch_admin" || id === adminBranchId)
       .map(([id, name]) => ({
         name,
         count:
           id === TOTAL_SOCIETY_ID
-            ? members.length
-            : members.filter(m => m.boundBranches.includes(id)).length,
+            ? formalMembers.length
+            : formalMembers.filter(m => m.boundBranches.includes(id)).length,
       }));
-    const nonMemberUsers = members.filter(m => m.userType === "non_member");
-    const memberUsers = members.filter(m => m.userType === "member");
     return {
       totalUsers: members.length,
-      nonMemberCount: nonMemberUsers.length,
-      memberCount: memberUsers.length,
-      activeMembers: memberUsers.filter(m => m.membershipStatus === MEMBERSHIP_STATUS.ACTIVE).length,
+      nonMemberCount: nonFormalMembers.length,
+      memberCount: formalMembers.length,
+      activeMembers: formalMembers.length,
+      pendingMembershipCount: pipelineMembers.length,
       pendingReviews: vouchers.length + invoices.length,
       activeConferences: confs.filter(c => c.status === "published").length,
       recentReviews: [...vouchers, ...invoices].slice(0, 5),
@@ -2738,7 +2744,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getBranchDashboardStats = useCallback((branchId: string): BranchDashboardStats => {
     const confs = getAllConferences().filter(c => c.branchId === branchId);
-    const members = getAllMembers().filter(m => m.boundBranches.includes(branchId));
+    const members = getAllMembers().filter(m =>
+      isFormalMemberStatus(m.membershipStatus) && m.boundBranches.includes(branchId));
     const vouchers = pendingVoucherReviews;
     const branchConfIds = new Set(confs.map(c => c.id));
 
@@ -2796,13 +2803,14 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const getGlobalStats = useCallback((): GlobalStats => {
     const members = getAllMembers();
     const confs = getAllConferences();
-    const memberUsers = members.filter(m => m.userType === "member");
-    const nonMemberUsers = members.filter(m => m.userType === "non_member");
+    const formalMembers = members.filter(m => isFormalMemberStatus(m.membershipStatus));
+    const nonFormalMembers = members.filter(m =>
+      !isFormalMemberStatus(m.membershipStatus) && !isMembershipPipelineStatus(m.membershipStatus));
 
-    const studentMembers = memberUsers.filter(m => m.role === "学生").length;
-    const nonStudentMembers = memberUsers.filter(m => m.role !== "学生").length;
-    const studentNonMembers = nonMemberUsers.filter(m => m.role === "学生").length;
-    const nonStudentNonMembers = nonMemberUsers.filter(m => m.role !== "学生").length;
+    const studentMembers = formalMembers.filter(m => m.role === "学生").length;
+    const nonStudentMembers = formalMembers.filter(m => m.role !== "学生").length;
+    const studentNonMembers = nonFormalMembers.filter(m => m.role === "学生").length;
+    const nonStudentNonMembers = nonFormalMembers.filter(m => m.role !== "学生").length;
 
     let studentMembershipFeeCount = 0;
     let studentMembershipFeeAmount = 0;
@@ -2853,8 +2861,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     return {
       totalUsers: members.length,
-      totalMembers: memberUsers.length,
-      totalNonMembers: nonMemberUsers.length,
+      totalMembers: formalMembers.length,
+      totalNonMembers: nonFormalMembers.length,
       studentMembers,
       nonStudentMembers,
       studentNonMembers,
@@ -3428,7 +3436,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       id,
       name,
       description: `${name}是中国古生物学会下属专业分会`,
-      memberCount: members.filter(m => m.boundBranches.includes(id)).length,
+      memberCount: members.filter(m => isFormalMemberStatus(m.membershipStatus) && m.boundBranches.includes(id)).length,
       disabled: false,
     }));
     if (stored) {

@@ -417,6 +417,7 @@ export interface ApiDashboardStats {
   memberCount: number;
   nonMemberCount: number;
   activeMembers: number;
+  pendingMembershipCount?: number;
   studentMembers: number;
   nonStudentMembers: number;
   studentNonMembers: number;

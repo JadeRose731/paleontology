@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Search, Eye, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
-import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, BRANCH_MAP, getUserTypeLabel, formatBoundBranchLabel } from "@shared/constants";
+import { MEMBERSHIP_STATUS, MEMBERSHIP_STATUS_LABEL, BRANCH_MAP, getUserTypeLabel, formatBoundBranchLabel, isFormalMemberStatus } from "@shared/constants";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -122,11 +122,13 @@ export default function NonMemberManagement() {
 
   const filters = useMemo(() => ({
     search: search || undefined,
-    status: MEMBERSHIP_STATUS.NOT_MEMBER,
     branchId: branchFilter !== SENTINEL_ALL ? branchFilter : undefined,
   }), [search, branchFilter]);
 
-  const members = useMemo(() => getAllMembers(filters), [getAllMembers, filters]);
+  const members = useMemo(() => {
+    const all = getAllMembers(filters);
+    return all.filter(m => !isFormalMemberStatus(m.membershipStatus));
+  }, [getAllMembers, filters]);
 
   const totalPages = Math.max(1, Math.ceil(members.length / ITEMS_PER_PAGE));
   const paginatedMembers = members.slice(
@@ -161,7 +163,7 @@ export default function NonMemberManagement() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-strata-blue-deep">非会员用户管理</h1>
-        <p className="text-muted-foreground mt-1">管理非会员用户信息、绑定分会和账号权限</p>
+        <p className="text-muted-foreground mt-1">管理非会员及入会办理中用户（申请书审核、会费凭证、发票审核未完成）</p>
       </div>
 
       <Card>

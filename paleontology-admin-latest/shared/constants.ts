@@ -70,6 +70,28 @@ export const MEMBERSHIP_STATUS = {
 
 export type MembershipStatus = typeof MEMBERSHIP_STATUS[keyof typeof MEMBERSHIP_STATUS];
 
+/** 入会办理中（申请书/会费/发票任一环节未完成） */
+export const MEMBERSHIP_PIPELINE_STATUSES: ReadonlySet<string> = new Set([
+  MEMBERSHIP_STATUS.APPLICATION_SUBMITTED,
+  MEMBERSHIP_STATUS.APPLICATION_REJECTED,
+  MEMBERSHIP_STATUS.APPLICATION_APPROVED,
+  MEMBERSHIP_STATUS.VOUCHER_SUBMITTED,
+  MEMBERSHIP_STATUS.VOUCHER_REJECTED,
+  MEMBERSHIP_STATUS.INVOICE_PENDING,
+  MEMBERSHIP_STATUS.INVOICE_OVERDUE,
+  MEMBERSHIP_STATUS.INVOICE_SUBMITTED,
+  MEMBERSHIP_STATUS.INVOICE_REJECTED,
+]);
+
+/** 已完成入会全流程：申请书通过 + 会费凭证通过 + 发票通过 */
+export function isFormalMemberStatus(status?: string | null): boolean {
+  return status === MEMBERSHIP_STATUS.ACTIVE;
+}
+
+export function isMembershipPipelineStatus(status?: string | null): boolean {
+  return !!status && MEMBERSHIP_PIPELINE_STATUSES.has(status);
+}
+
 // ── 用户类型枚举（双路径选择） ───────────────────────────────────────────────
 
 export const USER_TYPE = {

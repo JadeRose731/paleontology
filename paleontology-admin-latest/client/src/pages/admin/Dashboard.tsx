@@ -108,6 +108,7 @@ function SuperAdminView({ stats }: { stats: DashboardStats }) {
     nonMemberCount: apiStats.nonMemberCount,
     memberCount: apiStats.memberCount,
     activeMembers: apiStats.activeMembers,
+    pendingMembershipCount: apiStats.pendingMembershipCount ?? stats.pendingMembershipCount,
     activeConferences: apiStats.activeConferences,
     branchMemberCounts: apiStats.branchMemberCounts.length > 0 ? apiStats.branchMemberCounts : stats.branchMemberCounts,
   } : stats;
@@ -147,11 +148,12 @@ function SuperAdminView({ stats }: { stats: DashboardStats }) {
   return (
     <div className="space-y-6">
       {/* Row 1: Basic stats */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <StatCard title="用户总数" value={effectiveStats.totalUsers} icon={Users} delay={0} />
-        <StatCard title="非会员" value={effectiveStats.nonMemberCount} icon={Users} delay={0.1} />
-        <StatCard title="会员" value={effectiveStats.memberCount} icon={LayoutDashboard} delay={0.15} />
-        <StatCard title="活跃会员" value={effectiveStats.activeMembers} icon={LayoutDashboard} delay={0.2} />
+        <StatCard title="正式会员" value={effectiveStats.memberCount} icon={LayoutDashboard} delay={0.1} />
+        <StatCard title="入会办理中" value={effectiveStats.pendingMembershipCount} icon={LayoutDashboard} delay={0.15} />
+        <StatCard title="非会员/其他" value={effectiveStats.nonMemberCount} icon={Users} delay={0.2} />
+        <StatCard title="待审核" value={effectiveStats.pendingReviews} icon={LayoutDashboard} delay={0.25} />
       </div>
 
       {/* Row 1b: Fee totals */}
