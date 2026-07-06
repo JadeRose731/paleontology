@@ -4,6 +4,7 @@ import type { CmsBlock, CmsPageResolveData } from "@/lib/cms-types";
 
 export interface ApiCmsEntry {
   entryId?: number;
+  associationId?: number | null;
   moduleCode: string;
   columnCode?: string | null;
   scope?: string;
@@ -97,9 +98,9 @@ export function parseLayoutParams<T extends Record<string, unknown>>(json?: stri
   try { return JSON.parse(json) as T; } catch { return (fallback ?? {}) as T; }
 }
 
-export function parseExtra<T>(json?: string | null, fallback?: T): T {
-  if (!json) return fallback as T;
-  try { return JSON.parse(json) as T; } catch { return fallback as T; }
+export function parseExtra<T extends Record<string, unknown>>(json?: string | null, fallback?: T): T {
+  if (!json) return (fallback ?? {}) as T;
+  try { return JSON.parse(json) as T; } catch { return (fallback ?? {}) as T; }
 }
 
 export function isPinned(e: ApiCmsEntry): boolean {

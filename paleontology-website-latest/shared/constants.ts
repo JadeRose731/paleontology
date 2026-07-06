@@ -205,6 +205,50 @@ export const BRANCH_IDS: string[] = Object.keys(BRANCH_MAP);
 
 export const VALID_BRANCH_IDS = new Set(BRANCH_IDS);
 
+/** DB association_id → 前端 branch_code（与 V22 迁移一致） */
+export const ASSOCIATION_ID_TO_BRANCH_CODE: Record<number, string> = {
+  1: "zgswxh",
+  2: "gwjzdwxfh",
+  3: "gzwxfh",
+  4: "kpgzwyh",
+  6: "wtxfh",
+  7: "hszlzwyh",
+  8: "gjzdw",
+  10: "gst",
+  11: "bfxfh",
+  12: "dqswx",
+  13: "swcj",
+  14: "xjsxff",
+};
+
+export const BRANCH_CODE_TO_ASSOCIATION_ID: Record<string, number> = Object.fromEntries(
+  Object.entries(ASSOCIATION_ID_TO_BRANCH_CODE).map(([id, code]) => [code, Number(id)]),
+) as Record<string, number>;
+
+/** 从 CMS 条目的 associationId / branchId 字段解析 canonical 分会编码 */
+export function resolveBranchCodeFromCms(
+  branchId?: string | null,
+  associationId?: number | null,
+): string | null {
+  if (branchId && VALID_BRANCH_IDS.has(branchId)) return branchId;
+  if (branchId && BRANCH_CODE_TO_ASSOCIATION_ID[branchId] == null) {
+    const mapped = ASSOCIATION_ID_TO_BRANCH_CODE[Number(branchId)];
+    if (mapped) return mapped;
+  }
+  if (associationId != null) {
+    return ASSOCIATION_ID_TO_BRANCH_CODE[associationId] ?? null;
+  }
+  return null;
+}
+
+/** 分会编码 → DB association_id */
+export function resolveAssociationIdFromBranch(branchId?: string | null): number | null {
+  if (!branchId) return null;
+  if (BRANCH_CODE_TO_ASSOCIATION_ID[branchId]) return BRANCH_CODE_TO_ASSOCIATION_ID[branchId];
+  const n = parseInt(branchId, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
 /** 所有学会单元 ID 列表（总学会 + 11 分会） */
 export const ALL_SOCIETY_IDS: string[] = Object.keys(ALL_SOCIETY_UNITS);
 

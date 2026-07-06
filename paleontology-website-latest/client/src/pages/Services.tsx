@@ -7,41 +7,10 @@ import LoginJoinDialog from "../components/LoginJoinDialog";
 import { CmsRichTextBody } from "@/components/CmsPageHeader";
 import { useCmsEntries } from "@/hooks/useCmsEntries";
 import { useServiceCategories } from "@/hooks/useServiceCategories";
-import { formatDate, type ApiCmsEntry } from "@/lib/cms-api";
 import type { ServiceContentModule } from "@/lib/services-categories";
+import { serviceModuleRoute } from "@shared/service-content-sections";
 import { pickAndReadFile, pickFile, type UploadedFile } from "../lib/fileUpload";
 import { CONFERENCE_STATUS_LABEL, CONFERENCE_STATUS_COLOR, CONFERENCE_STATUS, getConferenceFeeConfig as getConfiguredFeeConfig, type ConferenceFeeConfig, CONFERENCE_FEE_TYPE_LABEL, type ConferenceFeeType, ALL_SOCIETY_UNITS, TOTAL_SOCIETY_ID, TOTAL_SOCIETY_INTRO, TOTAL_SOCIETY_TAGS, TOTAL_SOCIETY_MEETINGS, isSocietyAccessible, isDeadlinePassed, sortConferencesSocietyFirst, ACCOMMODATION_TYPE_LABEL, type AccommodationType, FIELD_TRIP_PHASE_LABEL, type FieldTripRoute, type FieldTripSelections, createEmptyFieldTripSelections, createDefaultFieldTripRoutes, canSelectFieldTripRoute, validateFieldTripSelections, FIELD_TRIP_GENDER_RESTRICTION_LABEL } from "@shared/constants";
-
-const SCIENCE_FORMAT_LABELS: Record<string, string> = {
-  article: "科普动态",
-  video: "科普视频",
-  base: "科普基地",
-  book: "科普期刊",
-  fossil: "化石保护与利用",
-};
-
-const SCIENCE_FORMAT_ORDER = ["article", "video", "base", "book", "fossil"] as const;
-
-const INTL_NAV = [
-  { code: "news", label: "交流动态" },
-  { code: "conference", label: "国际会议" },
-  { code: "report", label: "重要报告" },
-  { code: "partner", label: "合作机构" },
-] as const;
-
-const INTL_TYPE_LABELS: Record<string, string> = {
-  news: "交流动态",
-  conference: "国际会议",
-  report: "重要报告",
-  partner: "合作机构",
-};
-
-const INTL_TYPE_ICONS: Record<string, string> = {
-  news: "public",
-  report: "description",
-  conference: "groups",
-  partner: "handshake",
-};
 
 const AWARD_CARD_STYLES = [
   { icon: "star", color: "bg-yellow-50 border-yellow-200" },
@@ -112,27 +81,8 @@ export default function Services() {
   const [activeTab, setActiveTab] = useState<string>("main");
   const [conferenceBranchFilter, setConferenceBranchFilter] = useState<string | null>(null);
   const [noticePreviewConfId, setNoticePreviewConfId] = useState<string | null>(null);
-  const [scienceFormat, setScienceFormat] = useState<string>("all");
-  const [intlTypeFilter, setIntlTypeFilter] = useState<string>("all");
 
-  const { items: scienceCmsItems, loading: scienceLoading } = useCmsEntries({ moduleCode: "science" });
-  const { items: intlCmsItems, loading: intlLoading } = useCmsEntries({ moduleCode: "international" });
   const { items: techCmsItems, loading: techLoading } = useCmsEntries({ moduleCode: "tech-rewards" });
-
-  const filteredScienceItems = useMemo(() => {
-    if (scienceFormat === "all") return scienceCmsItems;
-    return scienceCmsItems.filter(i => (i.columnCode ?? "article") === scienceFormat);
-  }, [scienceCmsItems, scienceFormat]);
-
-  const filteredIntlItems = useMemo(() => {
-    if (intlTypeFilter === "all") return intlCmsItems;
-    return intlCmsItems.filter(i => (i.columnCode ?? "news") === intlTypeFilter);
-  }, [intlCmsItems, intlTypeFilter]);
-
-  const intlPartnerItems = useMemo(
-    () => intlCmsItems.filter(i => (i.columnCode ?? "news") === "partner"),
-    [intlCmsItems],
-  );
 
   const techIntroItems = useMemo(
     () => techCmsItems.filter(i => (i.columnCode ?? "intro") === "intro"),
@@ -149,9 +99,27 @@ export default function Services() {
 
   const activeCmsCategory = cmsServiceTabs.find(c => c.websiteTabKey === activeTab);
 
+  const openServiceModule = (module: ServiceContentModule) => {
+    const route = serviceModuleRoute(module);
+    if (route) {
+      setLocation(route);
+      return;
+    }
+    const cat = cmsServiceTabs.find(c => c.contentModule === module);
+    if (cat) setActiveTab(cat.websiteTabKey);
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get("tab");
+    if (tabParam === "international") {
+      setLocation("/international");
+      return;
+    }
+    if (tabParam === "science") {
+      setLocation("/science");
+      return;
+    }
     const cmsTabKeys = cmsServiceTabs.map(c => c.websiteTabKey);
     const validTabs = ["branches", "member", "conference", "main", ...cmsTabKeys];
     if (tabParam && validTabs.includes(tabParam)) {
@@ -161,7 +129,7 @@ export default function Services() {
     if (branchParam) {
       setConferenceBranchFilter(branchParam);
     }
-  }, [location, cmsServiceTabs]);
+  }, [location, cmsServiceTabs, setLocation]);
 
   // Dialog & Flow States
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -455,8 +423,8 @@ export default function Services() {
               <button onClick={() => setActiveTab("branches")} className="bg-[#002B49] hover:bg-[#001f35] text-white px-8 py-3 rounded-lg font-bold text-sm transition-all shadow-md flex items-center gap-2">
                 <span className="material-symbols-outlined text-sm">account_tree</span> 专业分会
               </button>
-              <button onClick={() => setActiveTab(cmsServiceTabs[0]?.websiteTabKey ?? "international")} className="border border-[#002B49] text-[#002B49] hover:bg-slate-50 px-8 py-3 rounded-lg font-bold text-sm transition-all">
-                {cmsServiceTabs[0]?.navName ?? "国际交流"}
+              <button onClick={() => openServiceModule("international")} className="border border-[#002B49] text-[#002B49] hover:bg-slate-50 px-8 py-3 rounded-lg font-bold text-sm transition-all">
+                国际交流
               </button>
             </div>
           </div>
@@ -499,7 +467,7 @@ export default function Services() {
             {cmsServiceTabs.map(cat => (
               <div
                 key={cat.websiteTabKey}
-                onClick={() => setActiveTab(cat.websiteTabKey)}
+                onClick={() => openServiceModule(cat.contentModule)}
                 className="bg-white border-t-4 border-[#002B49] border-x border-b border-[#E5E1DA] p-6 hover:-translate-y-1 hover:shadow-lg transition-all duration-300 cursor-pointer group rounded-b-lg"
               >
                 <div className="bg-slate-100 w-12 h-12 flex items-center justify-center rounded-lg mb-4 group-hover:bg-[#002B49] transition-colors">
@@ -956,7 +924,7 @@ export default function Services() {
               </h3>
 
               {/* 非会员状态 */}
-              {isNonMember && (
+              {isNonMember && societyMembership?.status === "not_member" && (
                 <div className="text-center py-6">
                   <span className="material-symbols-outlined text-4xl text-slate-300 mb-2">person</span>
                   <p className="text-xs text-slate-600 mb-1 font-bold">您当前为非会员</p>
@@ -974,7 +942,7 @@ export default function Services() {
               )}
 
               {/* Phase 6: 入会申请流程（含退会后重新申请路径） */}
-              {((!isNonMember && !isRegular && !hasApplied) || (isWithdrawn && appFlowStep > 0)) && (
+              {((userType === "member" && societyMembership?.status === "not_member") || (isWithdrawn && appFlowStep > 0)) && (
                 <div className="space-y-4 py-2">
                   {appFlowStep === 0 && (
                     <div className="text-center py-6 space-y-4">
@@ -3050,280 +3018,6 @@ export default function Services() {
   };
 
   // ==========================================================================
-  // RENDER: SCIENCE COMMUNICATION (CMS-driven)
-  // ==========================================================================
-  const renderScienceListItem = (item: ApiCmsEntry) => (
-    <article key={item.entryId} className="py-4 flex flex-col gap-2 border-b border-[#E5E1DA] last:border-0 px-1 hover:bg-slate-50 transition-colors">
-      <div className="flex items-center gap-3">
-        <span className="px-2 py-0.5 font-bold text-[10px] rounded-sm bg-blue-50 text-blue-700">
-          {item.category ?? SCIENCE_FORMAT_LABELS[item.columnCode ?? "article"] ?? "科学传播"}
-        </span>
-        <time className="text-xs text-slate-500 font-medium">{formatDate(item)}</time>
-      </div>
-      <h4 className="font-bold text-[#002B49] text-sm">{item.title}</h4>
-      {item.summary && <p className="text-slate-500 leading-relaxed">{item.summary}</p>}
-      {item.bodyContent && (
-        <CmsRichTextBody html={item.bodyContent} className="text-xs text-slate-600 line-clamp-3" />
-      )}
-      {item.linkUrl && (
-        <a
-          className="text-[#002B49] font-bold text-xs flex items-center gap-1 hover:gap-2 transition-all w-fit"
-          href={item.linkUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          查看详情 <span className="material-symbols-outlined text-sm">arrow_right_alt</span>
-        </a>
-      )}
-    </article>
-  );
-
-  const renderScienceComm = () => {
-    const bookItems = filteredScienceItems.filter(i => (i.columnCode ?? "article") === "book");
-    const baseItems = filteredScienceItems.filter(i => (i.columnCode ?? "article") === "base");
-    const listItems = filteredScienceItems.filter(i => {
-      const fmt = i.columnCode ?? "article";
-      return fmt !== "book" && fmt !== "base";
-    });
-
-    return (
-      <div className="max-w-7xl mx-auto py-12 px-6">
-        <div className="flex flex-col md:flex-row gap-8">
-          <div className="w-full md:w-1/4 space-y-2">
-            <h2 className="text-base font-bold text-[#002B49] mb-4 border-b border-[#E5E1DA] pb-2">科学传播大纲</h2>
-            <button
-              type="button"
-              onClick={() => setScienceFormat("all")}
-              className={`w-full text-left px-4 py-2 rounded font-bold flex justify-between items-center text-xs ${
-                scienceFormat === "all" ? "bg-[#002B49] text-white" : "text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              全部内容
-              <span className="material-symbols-outlined text-sm">{scienceFormat === "all" ? "arrow_right_alt" : "chevron_right"}</span>
-            </button>
-            {SCIENCE_FORMAT_ORDER.map(fmt => (
-              <button
-                key={fmt}
-                type="button"
-                onClick={() => setScienceFormat(fmt)}
-                className={`w-full text-left px-4 py-2 rounded font-bold flex justify-between items-center text-xs ${
-                  scienceFormat === fmt ? "bg-[#002B49] text-white" : "text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                {SCIENCE_FORMAT_LABELS[fmt]}
-                <span className="material-symbols-outlined text-sm">{scienceFormat === fmt ? "arrow_right_alt" : "chevron_right"}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="w-full md:w-3/4 space-y-8 text-xs">
-            {scienceLoading && <p className="text-sm text-slate-500">加载中…</p>}
-
-            {!scienceLoading && filteredScienceItems.length === 0 && (
-              <p className="text-sm text-slate-500 py-8 text-center">暂无科学传播内容，请在管理后台「科学传播」模块维护并发布。</p>
-            )}
-
-            {!scienceLoading && bookItems.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {bookItems.map(item => (
-                  <div key={item.entryId} className="bg-white border border-[#E5E1DA] p-6 rounded-lg">
-                    <h3 className="text-sm font-bold text-[#002B49] mb-2">{item.title}</h3>
-                    <p className="text-slate-500 mb-4 min-h-16 leading-relaxed">{item.summary ?? ""}</p>
-                    {item.category && (
-                      <span className="bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded text-[10px]">{item.category}</span>
-                    )}
-                    {item.linkUrl && (
-                      <a className="mt-3 block text-[#002B49] font-bold text-[10px] hover:underline" href={item.linkUrl} target="_blank" rel="noopener noreferrer">
-                        访问链接
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {!scienceLoading && baseItems.length > 0 && (
-              <div className="border-t border-[#E5E1DA] pt-6">
-                <h3 className="font-bold text-[#002B49] text-sm mb-4">科普基地工作动态</h3>
-                <div className="space-y-4">
-                  {baseItems.map(item => (
-                    <div key={item.entryId} className="bg-white border border-[#E5E1DA] p-5 rounded-lg flex gap-4 items-start">
-                      <span className="material-symbols-outlined text-4xl text-[#715a3e] shrink-0">explore</span>
-                      <div>
-                        <h4 className="font-bold text-[#002B49] text-xs">{item.title}</h4>
-                        {item.summary && <p className="text-slate-500 mt-1 leading-relaxed">{item.summary}</p>}
-                        {item.bodyContent && <CmsRichTextBody html={item.bodyContent} className="mt-2 text-slate-600" />}
-                        {item.linkUrl && (
-                          <a className="mt-2 inline-flex text-[#002B49] font-bold text-[10px] hover:underline" href={item.linkUrl} target="_blank" rel="noopener noreferrer">
-                            了解更多
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {!scienceLoading && listItems.length > 0 && (
-              <div className={bookItems.length > 0 || baseItems.length > 0 ? "border-t border-[#E5E1DA] pt-6" : ""}>
-                {(scienceFormat === "all" && (bookItems.length > 0 || baseItems.length > 0)) && (
-                  <h3 className="font-bold text-[#002B49] text-sm mb-4">更多内容</h3>
-                )}
-                {listItems.map(renderScienceListItem)}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // ==========================================================================
-  // RENDER: INTERNATIONAL EXCHANGE (CMS-driven)
-  // ==========================================================================
-  const renderInternational = () => (
-    <div className="max-w-7xl mx-auto py-12 px-6">
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-12">
-        <div className="lg:col-span-1">
-          <div className="sticky top-40 space-y-6">
-            <div className="bg-white border border-[#E5E1DA] rounded-lg overflow-hidden shadow-sm">
-              <div className="bg-[#002B49] text-white px-6 py-4 font-bold">栏目导航</div>
-              <nav className="flex flex-col">
-                <button
-                  type="button"
-                  onClick={() => setIntlTypeFilter("all")}
-                  className={`px-6 py-3 border-b border-[#E5E1DA] hover:bg-slate-50 transition-colors flex items-center justify-between group text-left ${
-                    intlTypeFilter === "all" ? "bg-slate-50" : ""
-                  }`}
-                >
-                  <span className="text-sm">全部动态</span>
-                  <span className="material-symbols-outlined text-slate-400 group-hover:text-[#002B49] text-xs">arrow_forward_ios</span>
-                </button>
-                {INTL_NAV.map(nav => (
-                  <button
-                    key={nav.code}
-                    type="button"
-                    onClick={() => setIntlTypeFilter(nav.code)}
-                    className={`px-6 py-3 border-b border-[#E5E1DA] last:border-b-0 hover:bg-slate-50 transition-colors flex items-center justify-between group text-left ${
-                      intlTypeFilter === nav.code ? "bg-slate-50" : ""
-                    }`}
-                  >
-                    <span className="text-sm">{nav.label}</span>
-                    <span className="material-symbols-outlined text-slate-400 group-hover:text-[#002B49] text-xs">arrow_forward_ios</span>
-                  </button>
-                ))}
-              </nav>
-            </div>
-            <div className="p-6 bg-slate-50 border-l-4 border-[#002B49] rounded-lg">
-              <h4 className="font-bold text-[#002B49] mb-3 text-sm">联系国际合作处</h4>
-              <p className="text-xs text-slate-600 mb-4 leading-relaxed">如有国际会议、学术访问或合作咨询，欢迎联系我们。</p>
-              <a className="text-[#002B49] font-bold text-xs flex items-center gap-2 hover:underline" href="mailto:intl@chinapsc.cn">
-                <span className="material-symbols-outlined text-base">mail</span> intl@chinapsc.cn
-              </a>
-            </div>
-          </div>
-        </div>
-        <div className="lg:col-span-3">
-          <div className="mb-8 flex justify-between items-center border-b-2 border-[#002B49] pb-4">
-            <h2 className="text-2xl font-bold text-[#002B49]">国际交流动态</h2>
-          </div>
-
-          {intlLoading && <p className="text-sm text-slate-500">加载中…</p>}
-
-          {!intlLoading && filteredIntlItems.length === 0 && (
-            <p className="text-sm text-slate-500 py-8 text-center">暂无国际交流动态，请在管理后台「国际交流」模块维护并发布。</p>
-          )}
-
-          <div className="space-y-0 divide-y divide-[#E5E1DA] border-t border-[#E5E1DA]">
-            {filteredIntlItems.map(item => {
-              const type = item.columnCode ?? "news";
-              const label = INTL_TYPE_LABELS[type] ?? item.category ?? "国际交流";
-              const icon = INTL_TYPE_ICONS[type] ?? "public";
-              return (
-                <article key={item.entryId} className="py-6 flex gap-6 items-start hover:bg-slate-50 transition-all duration-200 group px-2">
-                  <div className="flex-shrink-0 w-12 h-12 bg-[#002B49] rounded-lg flex items-center justify-center text-white">
-                    <span className="material-symbols-outlined">{icon}</span>
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className="px-2 py-0.5 font-bold text-[10px] rounded-sm bg-[#f5e0ba] text-[#241a03]">{label}</span>
-                      <time className="text-xs text-slate-500 font-medium">{formatDate(item)}</time>
-                    </div>
-                    <h3 className="text-lg font-bold mb-3 text-slate-800 group-hover:text-[#002B49] transition-colors leading-snug">
-                      {item.title}
-                    </h3>
-                    {item.summary && (
-                      <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">{item.summary}</p>
-                    )}
-                    {item.bodyContent && (
-                      <div className="mt-3 hidden lg:block">
-                        <CmsRichTextBody html={item.bodyContent} className="text-xs line-clamp-3" />
-                      </div>
-                    )}
-                    {item.linkUrl && (
-                      <div className="mt-4">
-                        <a
-                          className="text-[#002B49] font-bold text-xs flex items-center gap-1 hover:gap-2 transition-all"
-                          href={item.linkUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          查看全文 <span className="material-symbols-outlined text-sm">arrow_right_alt</span>
-                        </a>
-                      </div>
-                    )}
-                  </div>
-                  {item.coverUrl && (
-                    <img src={item.coverUrl} alt={item.title} className="w-24 h-24 object-cover rounded border border-[#E5E1DA] shrink-0 hidden md:block" />
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      <section className="bg-[#002B49] py-12 rounded-lg mt-12">
-        <div className="text-center text-white">
-          <h2 className="text-2xl font-bold mb-8">全球学术伙伴</h2>
-          {intlPartnerItems.length > 0 ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 opacity-90 hover:opacity-100 transition-opacity items-center justify-items-center max-w-4xl mx-auto px-4">
-              {intlPartnerItems.map(item => (
-                item.linkUrl ? (
-                  <a
-                    key={item.entryId}
-                    href={item.linkUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex flex-col items-center gap-2 hover:scale-105 transition-transform"
-                  >
-                    {item.coverUrl ? (
-                      <img src={item.coverUrl} alt={item.title} className="h-12 object-contain max-w-full" />
-                    ) : (
-                      <div className="text-sm font-bold border border-white/20 px-4 py-2 rounded">{item.title}</div>
-                    )}
-                  </a>
-                ) : (
-                  <div key={item.entryId} className="flex flex-col items-center gap-2">
-                    {item.coverUrl ? (
-                      <img src={item.coverUrl} alt={item.title} className="h-12 object-contain max-w-full" />
-                    ) : (
-                      <div className="text-sm font-bold border border-white/20 px-4 py-2 rounded">{item.title}</div>
-                    )}
-                  </div>
-                )
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-white/70">合作机构信息请在管理后台「国际交流 → 合作机构」中维护。</p>
-          )}
-        </div>
-      </section>
-    </div>
-  );
-
-  // ==========================================================================
   // RENDER: SCIENCE & TECHNOLOGY AWARDS (CMS-driven)
   // ==========================================================================
   const renderAwards = () => {
@@ -3722,15 +3416,26 @@ export default function Services() {
             <button onClick={() => { setActiveTab("conference"); setShowFeePayment(null); setSelectedConference(null); setEditingReg(null); }} className={`px-4 py-3 font-bold text-xs transition-all flex items-center gap-2 border-b-2 -mb-[1px] ${activeTab === "conference" ? "border-[#002B49] text-[#002B49]" : "border-transparent text-slate-500 hover:text-[#002B49]"}`}>
               <span className="material-symbols-outlined text-[18px]">event</span> 学术会议
             </button>
-            {cmsServiceTabs.map(cat => (
+            {cmsServiceTabs.map(cat => {
+              const externalRoute = serviceModuleRoute(cat.contentModule);
+              return (
               <button
                 key={cat.websiteTabKey}
-                onClick={() => { setActiveTab(cat.websiteTabKey); setShowFeePayment(null); setSelectedConference(null); setEditingReg(null); }}
-                className={`px-4 py-3 font-bold text-xs transition-all flex items-center gap-2 border-b-2 -mb-[1px] ${activeTab === cat.websiteTabKey ? "border-[#002B49] text-[#002B49]" : "border-transparent text-slate-500 hover:text-[#002B49]"}`}
+                onClick={() => {
+                  setShowFeePayment(null);
+                  setSelectedConference(null);
+                  setEditingReg(null);
+                  if (externalRoute) {
+                    setLocation(externalRoute);
+                    return;
+                  }
+                  setActiveTab(cat.websiteTabKey);
+                }}
+                className={`px-4 py-3 font-bold text-xs transition-all flex items-center gap-2 border-b-2 -mb-[1px] ${!externalRoute && activeTab === cat.websiteTabKey ? "border-[#002B49] text-[#002B49]" : "border-transparent text-slate-500 hover:text-[#002B49]"}`}
               >
                 <span className="material-symbols-outlined text-[18px]">{CMS_TAB_ICONS[cat.contentModule]}</span> {cat.navName}
               </button>
-            ))}
+            );})}
           </div>
         </div>
 
@@ -3740,8 +3445,6 @@ export default function Services() {
           {activeTab === "branches" && renderBranches()}
           {activeTab === "member" && renderMemberServices()}
           {activeTab === "conference" && (selectedConference || editingReg ? renderConferenceServices() : renderConferenceList())}
-          {activeCmsCategory?.contentModule === "science" && renderScienceComm()}
-          {activeCmsCategory?.contentModule === "international" && renderInternational()}
           {activeCmsCategory?.contentModule === "tech-rewards" && renderAwards()}
         </div>
       </div>

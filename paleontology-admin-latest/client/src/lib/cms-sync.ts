@@ -11,6 +11,7 @@ import {
   type ApiCmsEntry, fromApiStatus, parseExtra, toApiStatus, toExtra,
   entryIdStr, parseEntryId,
 } from "./cms-api";
+import { resolveBranchCodeFromCms, resolveAssociationIdFromBranch } from "@shared/constants";
 
 const MODULES = [
   "banners", "news", "announcements", "pages", "personnel", "gallery", "awards",
@@ -141,7 +142,7 @@ function mapBanner(e: ApiCmsEntry): CmsBanner {
     imageUrl: e.coverUrl ?? "",
     linkUrl: e.linkUrl ?? "/",
     sort: e.sortOrder ?? 0,
-    branchId: ex.branchId ?? (e.associationId != null ? String(e.associationId) : null),
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
     enabled: ex.enabled !== false && e.status === "PUBLISHED",
   };
 }
@@ -149,7 +150,7 @@ function mapBanner(e: ApiCmsEntry): CmsBanner {
 function bannerToEntry(b: CmsBanner): ApiCmsEntry {
   return {
     entryId: parseEntryId(b.id) ?? undefined,
-    associationId: b.branchId ? parseInt(b.branchId, 10) || null : null,
+    associationId: resolveAssociationIdFromBranch(b.branchId),
     moduleCode: "banners",
     title: b.title,
     coverUrl: b.imageUrl,
@@ -172,7 +173,7 @@ function mapArticle(e: ApiCmsEntry): CmsArticle {
     status: fromApiStatus(e.status),
     pinned: e.pinned === "1",
     publishDate: e.publishTime?.split("T")[0] ?? e.publishTime?.split(" ")[0] ?? "",
-    branchId: ex.branchId ?? (e.associationId != null ? String(e.associationId) : null),
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
     scope: (ex.scope as CmsArticle["scope"]) ?? (e.scope as CmsArticle["scope"]) ?? "society",
     attachments: ex.attachments ?? [],
     showOnHomepage: ex.showOnHomepage ?? false,
@@ -182,7 +183,7 @@ function mapArticle(e: ApiCmsEntry): CmsArticle {
 function articleToEntry(a: CmsArticle, moduleCode: string): ApiCmsEntry {
   return {
     entryId: parseEntryId(a.id) ?? undefined,
-    associationId: a.branchId ? parseInt(a.branchId, 10) || null : null,
+    associationId: resolveAssociationIdFromBranch(a.branchId),
     moduleCode,
     title: a.title,
     category: a.category,
@@ -200,11 +201,12 @@ function mapPage(e: ApiCmsEntry): CmsPage {
   const ex = parseExtra<{ pageType?: CmsPage["pageType"]; branchId?: string | null }>(e.extraJson);
   return {
     id: entryIdStr(e.entryId) || `page-${e.entryId}`,
+    cmsEntryId: e.entryId,
     code: e.columnCode ?? "",
     title: e.title,
     content: e.bodyContent ?? "",
     status: fromApiStatus(e.status),
-    branchId: ex.branchId ?? (e.associationId != null ? String(e.associationId) : null),
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
     updatedAt: e.publishTime?.split("T")[0] ?? "",
     pageType: ex.pageType ?? "richtext",
   };
@@ -212,8 +214,8 @@ function mapPage(e: ApiCmsEntry): CmsPage {
 
 function pageToEntry(p: CmsPage): ApiCmsEntry {
   return {
-    entryId: parseEntryId(p.id) ?? undefined,
-    associationId: p.branchId ? parseInt(p.branchId, 10) || null : null,
+    entryId: p.cmsEntryId ?? parseEntryId(p.id) ?? undefined,
+    associationId: resolveAssociationIdFromBranch(p.branchId),
     moduleCode: "pages",
     columnCode: p.code,
     title: p.title,
@@ -235,14 +237,14 @@ function mapPerson(e: ApiCmsEntry): CmsPerson {
     bio: ex.bio ?? e.bodyContent ?? "",
     photoUrl: ex.photoUrl ?? e.coverUrl ?? "",
     sort: e.sortOrder ?? 0,
-    branchId: ex.branchId ?? (e.associationId != null ? String(e.associationId) : null),
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
   };
 }
 
 function personToEntry(p: CmsPerson): ApiCmsEntry {
   return {
     entryId: parseEntryId(p.id) ?? undefined,
-    associationId: p.branchId ? parseInt(p.branchId, 10) || null : null,
+    associationId: resolveAssociationIdFromBranch(p.branchId),
     moduleCode: "personnel",
     title: p.name,
     category: p.title,
@@ -264,7 +266,7 @@ function mapGallery(e: ApiCmsEntry): CmsGalleryPhoto {
     category: e.category ?? "",
     imageUrl: e.coverUrl ?? e.mediaUrl ?? "",
     sort: e.sortOrder ?? 0,
-    branchId: ex.branchId ?? (e.associationId != null ? String(e.associationId) : null),
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
   };
 }
 
@@ -278,7 +280,7 @@ function galleryToEntry(g: CmsGalleryPhoto): ApiCmsEntry {
     sortOrder: g.sort,
     status: "PUBLISHED",
     extraJson: toExtra({ branchId: g.branchId }),
-    associationId: g.branchId ? parseInt(g.branchId, 10) || null : null,
+    associationId: resolveAssociationIdFromBranch(g.branchId),
   };
 }
 
@@ -290,7 +292,7 @@ function mapAward(e: ApiCmsEntry): CmsAward {
     awardName: ex.awardName ?? e.title,
     winner: ex.winner ?? e.summary ?? "",
     description: e.bodyContent ?? "",
-    branchId: ex.branchId ?? (e.associationId != null ? String(e.associationId) : null),
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
   };
 }
 
@@ -304,7 +306,7 @@ function awardToEntry(a: CmsAward): ApiCmsEntry {
     bodyContent: a.description,
     status: "PUBLISHED",
     extraJson: toExtra({ awardName: a.awardName, winner: a.winner, branchId: a.branchId }),
-    associationId: a.branchId ? parseInt(a.branchId, 10) || null : null,
+    associationId: resolveAssociationIdFromBranch(a.branchId),
   };
 }
 
@@ -319,7 +321,7 @@ function mapScience(e: ApiCmsEntry): CmsScienceItem {
     content: e.bodyContent ?? "",
     externalUrl: e.linkUrl ?? "",
     status: fromApiStatus(e.status),
-    branchId: ex.branchId ?? (e.associationId != null ? String(e.associationId) : null),
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
     publishDate: e.publishTime?.split("T")[0] ?? "",
   };
 }
@@ -337,7 +339,7 @@ function scienceToEntry(s: CmsScienceItem): ApiCmsEntry {
     status: toApiStatus(s.status),
     publishTime: s.publishDate,
     extraJson: toExtra({ format: s.format, branchId: s.branchId }),
-    associationId: s.branchId ? parseInt(s.branchId, 10) || null : null,
+    associationId: resolveAssociationIdFromBranch(s.branchId),
   };
 }
 
@@ -458,7 +460,7 @@ function mapDownload(e: ApiCmsEntry): CmsDownloadFile {
     fileName: ex.fileName ?? e.summary ?? "",
     fileUrl: e.fileUrl ?? "",
     memberOnly: e.memberOnly === "1",
-    branchId: ex.branchId ?? (e.associationId != null ? String(e.associationId) : null),
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
     scope: (ex.scope as CmsDownloadFile["scope"]) ?? "society",
   };
 }
@@ -475,7 +477,7 @@ function downloadToEntry(d: CmsDownloadFile): ApiCmsEntry {
     status: "PUBLISHED",
     scope: d.scope,
     extraJson: toExtra({ fileName: d.fileName, branchId: d.branchId, scope: d.scope }),
-    associationId: d.branchId ? parseInt(d.branchId, 10) || null : null,
+    associationId: resolveAssociationIdFromBranch(d.branchId),
   };
 }
 
@@ -487,7 +489,7 @@ function mapTimeline(e: ApiCmsEntry): CmsTimelineNode {
     description: e.bodyContent ?? "",
     imageUrl: e.coverUrl ?? "",
     sort: e.sortOrder ?? 0,
-    branchId: e.associationId != null ? String(e.associationId) : null,
+    branchId: resolveBranchCodeFromCms(null, e.associationId),
   };
 }
 
@@ -502,6 +504,9 @@ function timelineToEntry(t: CmsTimelineNode): ApiCmsEntry {
     coverUrl: t.imageUrl,
     sortOrder: t.sort,
     status: "PUBLISHED",
+    scope: t.branchId ? "branch" : "society",
+    associationId: resolveAssociationIdFromBranch(t.branchId),
+    extraJson: toExtra({ branchId: t.branchId }),
   };
 }
 
@@ -564,18 +569,24 @@ function publishToEntry(p: CmsPublishArticle): ApiCmsEntry {
 }
 
 function mapPublicFile(e: ApiCmsEntry): CmsPublicFile {
-  const ex = parseExtra<{ fileName?: string; fileSize?: string; remark?: string; downloadCount?: number; uploadDate?: string; deleted?: boolean }>(e.extraJson);
+  const ex = parseExtra<{
+    fileName?: string; fileSize?: string; remark?: string; downloadCount?: number;
+    uploadDate?: string; deleted?: boolean; memberOnly?: boolean; branchId?: string | null;
+  }>(e.extraJson);
   return {
     id: entryIdStr(e.entryId) || `pf-${e.entryId}`,
     title: e.title,
     category: (e.columnCode as CmsPublicFile["category"]) ?? "document",
-    fileName: ex.fileName ?? "",
+    subjectCategory: e.category ?? "",
+    fileName: ex.fileName ?? e.summary ?? "",
     fileUrl: e.fileUrl ?? "",
     fileSize: ex.fileSize ?? "",
     remark: ex.remark ?? "",
     downloadCount: ex.downloadCount ?? 0,
     uploadDate: ex.uploadDate ?? e.publishTime?.split("T")[0] ?? "",
     deleted: ex.deleted ?? false,
+    memberOnly: ex.memberOnly ?? e.memberOnly === "1",
+    branchId: resolveBranchCodeFromCms(ex.branchId, e.associationId),
   };
 }
 
@@ -584,12 +595,18 @@ function publicFileToEntry(f: CmsPublicFile): ApiCmsEntry {
     entryId: parseEntryId(f.id) ?? undefined,
     moduleCode: "public-files",
     columnCode: f.category,
+    category: f.subjectCategory || undefined,
     title: f.title,
+    summary: f.fileName,
     fileUrl: f.fileUrl,
+    memberOnly: f.memberOnly ? "1" : "0",
     status: f.deleted ? "ARCHIVED" : "PUBLISHED",
+    scope: f.branchId ? "branch" : "society",
+    associationId: resolveAssociationIdFromBranch(f.branchId),
     extraJson: toExtra({
       fileName: f.fileName, fileSize: f.fileSize, remark: f.remark,
       downloadCount: f.downloadCount, uploadDate: f.uploadDate, deleted: f.deleted,
+      memberOnly: f.memberOnly, branchId: f.branchId ?? null,
     }),
   };
 }

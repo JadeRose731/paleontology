@@ -35,6 +35,55 @@ export interface ApiMemberProfile {
   validEndDate?: string;
 }
 
+/** 与后台 PaleoMembershipStatusService 对齐的会员状态解析 */
+export function resolveMembershipStatusFromApi(parts: {
+  membershipStatus?: string | null;
+  profile?: ApiMemberProfile | null;
+  joinApps?: ApiMembershipApplication[];
+  withdrawApps?: ApiMembershipApplication[];
+  payments?: ApiMembershipPayment[];
+}): string {
+  if (parts.membershipStatus) {
+    return parts.membershipStatus;
+  }
+
+  const joinApps = parts.joinApps ?? [];
+  const withdrawApps = parts.withdrawApps ?? [];
+  const payments = parts.payments ?? [];
+  const profile = parts.profile;
+
+  const pendingJoin = joinApps.find((a) => normalizeReviewStatus(a.reviewStatus) === "PENDING");
+  if (pendingJoin) return "application_submitted";
+
+  const pendingWithdraw = withdrawApps.find((a) => normalizeReviewStatus(a.reviewStatus) === "PENDING");
+  if (pendingWithdraw) return "withdrawal_submitted";
+
+  if (profile?.memberStatus === "WITHDRAWN") return "withdrawn";
+  if (profile?.memberStatus === "PENDING") return "application_approved";
+  if (profile?.memberStatus === "EXPIRED") return "expired";
+
+  const latestPayment = pickLatestMembershipPayment(payments);
+  const paymentMapped = latestPayment ? mapApiPaymentStatus(latestPayment.paymentStatus) : undefined;
+  if (latestPayment && paymentMapped && paymentMapped !== "unpaid" && paymentMapped !== "voided") {
+    if (paymentMapped === "confirmed") {
+      if (profile?.memberStatus === "ACTIVE") return "active";
+    } else {
+      return paymentMapped;
+    }
+  }
+
+  const approvedJoin = joinApps.find((a) => normalizeReviewStatus(a.reviewStatus) === "APPROVED");
+  if (approvedJoin) return "application_approved";
+
+  const authoritativeJoin = pickAuthoritativeJoinApplication(joinApps);
+  if (authoritativeJoin && normalizeReviewStatus(authoritativeJoin.reviewStatus) === "REJECTED") {
+    return "application_rejected";
+  }
+
+  if (profile?.memberStatus === "ACTIVE") return "active";
+  return "not_member";
+}
+
 export interface ApiMembershipPayment {
   paymentId?: number;
   userId?: number;
@@ -92,6 +141,33 @@ export function mapApiPaymentStatus(status?: string): string {
     PENDING: "unpaid",
   };
   return status ? (map[status] || status.toLowerCase()) : "unpaid";
+}
+
+/** 选取当前有效的会员费记录（跳过 VOIDED 与空 UNPAID 草稿） */
+export function pickLatestMembershipPayment(payments: ApiMembershipPayment[]): ApiMembershipPayment | undefined {
+  const sorted = [...payments].sort((a, b) => (b.paymentId ?? 0) - (a.paymentId ?? 0));
+  return sorted.find((p) => {
+    const status = (p.paymentStatus || "").toUpperCase();
+    if (status === "VOIDED") return false;
+    if (status === "UNPAID" && !p.voucherUrl) return false;
+    return true;
+  });
+}
+
+export function normalizeReviewStatus(status?: string | null): string {
+  return (status || "").trim().toUpperCase();
+}
+
+/** 入会申请：优先最新待审，否则最新已通过，否则最新一条 */
+export function pickAuthoritativeJoinApplication(
+  apps: ApiMembershipApplication[],
+): ApiMembershipApplication | undefined {
+  const sorted = [...apps].sort((a, b) => (b.applicationId ?? 0) - (a.applicationId ?? 0));
+  const pending = sorted.find((a) => normalizeReviewStatus(a.reviewStatus) === "PENDING");
+  if (pending) return pending;
+  const approved = sorted.find((a) => normalizeReviewStatus(a.reviewStatus) === "APPROVED");
+  if (approved) return approved;
+  return sorted[0];
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -236,6 +312,7 @@ export async function loginUser(email: string, password: string) {
     token: string;
     user: ApiPaleoUser;
     profile: ApiMemberProfile;
+    membershipStatus?: string;
   }>("/paleo/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
@@ -249,6 +326,7 @@ export async function registerUser(payload: Record<string, unknown>, password: s
     token: string;
     user: ApiPaleoUser;
     profile: ApiMemberProfile;
+    membershipStatus?: string;
   }>("/paleo/auth/register", {
     method: "POST",
     body: JSON.stringify({ ...payload, password }),
@@ -258,7 +336,7 @@ export async function registerUser(payload: Record<string, unknown>, password: s
 }
 
 export async function fetchAuthInfo() {
-  return request<{ user: ApiPaleoUser; profile: ApiMemberProfile }>("/paleo/auth/info");
+  return request<{ user: ApiPaleoUser; profile: ApiMemberProfile; membershipStatus?: string }>("/paleo/auth/info");
 }
 
 export async function updateUserTypeApi(userType: string, membershipChoiceMade: boolean) {

@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { CmsRichTextBody } from "@/components/CmsPageHeader";
 import { CmsPageShell } from "@/components/cms/CmsPageShell";
+import InternationalExchangePanel from "@/components/services/InternationalExchangePanel";
+import ScienceCommunicationPanel from "@/components/services/ScienceCommunicationPanel";
 import { PartyTopicsList } from "@/components/party/PartyTopicsList";
 import type { CmsLayoutProps } from "@/lib/cms-types";
 import { formatDate, isPinned, parseExtra, type ApiCmsEntry } from "@/lib/cms-api";
@@ -342,20 +344,21 @@ export function CmsTopicsLayout({ routePath }: CmsLayoutProps) {
   return <PartyTopicsList routePath={routePath} />;
 }
 
-export function CmsInternationalLayout({ channel, entries, routePath }: CmsLayoutProps) {
+export function CmsInternationalLayout({ channel, routePath }: CmsLayoutProps) {
+  return (
+    <CmsPageShell
+      channel={channel}
+      routePath={routePath}
+    >
+      <InternationalExchangePanel />
+    </CmsPageShell>
+  );
+}
+
+export function CmsScienceLayout({ channel, routePath }: CmsLayoutProps) {
   return (
     <CmsPageShell channel={channel} routePath={routePath}>
-      <PageHeader channel={channel} routePath={routePath} />
-      <div className="space-y-6">
-        {entries.map(item => (
-          <article key={item.entryId} className="bg-white border border-fossil-stone p-6 rounded">
-            <h3 className="font-bold text-primary">{item.title}</h3>
-            {item.category && <span className="text-xs bg-amber-100 text-amber-900 px-2 py-0.5 rounded">{item.category}</span>}
-            <p className="text-sm text-slate-600 mt-2">{item.summary}</p>
-            <CmsRichTextBody html={item.bodyContent ?? ""} className="mt-3" />
-          </article>
-        ))}
-      </div>
+      <ScienceCommunicationPanel />
     </CmsPageShell>
   );
 }

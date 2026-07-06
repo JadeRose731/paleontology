@@ -32,12 +32,12 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs, f
 
   // 首次登录且未做选择时，弹出决策对话框
   React.useEffect(() => {
-    if (isLoggedIn && !membershipChoiceMade) {
+    if (isLoggedIn && userType === "regular" && !membershipChoiceMade) {
       setShowChoiceDialog(true);
     } else {
       setShowChoiceDialog(false);
     }
-  }, [isLoggedIn, membershipChoiceMade]);
+  }, [isLoggedIn, userType, membershipChoiceMade]);
 
   const unreadNotifs = notifications.filter(n => !n.read);
 
@@ -63,8 +63,9 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs, f
     "/special-topics", "/exemplars", "/reporting", "/downloads"
   ];
   const isPartyPage = partyPaths.some(path => location === path || location.startsWith(path + "/"));
+  const isStructurePage = location === "/structure" || location.startsWith("/structure/");
 
-  const isFullWidthPage = fullWidth ?? (isSocietyHome || isServicesPage || location === "/intro" || location === "/structure" || location === "/history" || location === "/gallery" || location === "/society-announcements" || location === "/news-publish" || location === "/public-downloads" || location === "/international" || location === "/downloads-center" || location === "/regulations" || location === "/personal-center");
+  const isFullWidthPage = fullWidth ?? (isSocietyHome || isServicesPage || location === "/intro" || isStructurePage || location === "/history" || location === "/gallery" || location === "/society-announcements" || location === "/news-publish" || location === "/public-downloads" || location === "/international" || location === "/science" || location === "/regulations" || location === "/personal-center");
   const showPartySidebarLayout = showPartySidebar ?? (isPartyPage && !isFullWidthPage);
 
   const { mainNavLinks, partyNavItems: navItems } = useCmsChannels();
@@ -271,7 +272,7 @@ export default function PartyLayout({ children, currentPageTitle, breadcrumbs, f
           className={`w-full flex flex-col justify-center items-center text-white text-center px-4 relative bg-cover bg-center bg-no-repeat shadow-inner transition-all duration-300 ${location === "/party" && isPartyPage ? "h-[400px]" : "h-[200px]"}`}
           style={{
             backgroundImage: `url("${
-              isServicesPage || location === "/intro" || location === "/structure" || location === "/history" || location === "/gallery" || location === "/society-announcements" || location === "/international" || location === "/downloads-center" || location === "/regulations"
+              isServicesPage || location === "/intro" || isStructurePage || location === "/history" || location === "/gallery" || location === "/society-announcements" || location === "/international" || location === "/science" || location === "/public-downloads" || location === "/regulations"
                 ? "https://d2xsxph8kpxj0f.cloudfront.net/310519663722696584/gysodoNdzXEVcwP48r3Ven/services_banner-2sHLykD27n86AKuNQgfgUy.webp"
                 : "https://d2xsxph8kpxj0f.cloudfront.net/310519663722696584/gysodoNdzXEVcwP48r3Ven/party_banner-jBQJTUqe4SJ4mSGKcYzD7A.webp"
             }")`,

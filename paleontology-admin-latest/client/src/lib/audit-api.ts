@@ -61,6 +61,83 @@ export const AUDIT_ROLE_LABEL: Record<string, string> = {
   finance: "财务审核员",
 };
 
+export const AUDIT_STATUS_LABEL: Record<string, string> = {
+  PENDING: "待审核",
+  APPROVED: "已通过",
+  REJECTED: "已驳回",
+  UNPAID: "未缴费",
+  VOUCHER_REVIEW: "凭证审核中",
+  VOUCHER_REJECTED: "凭证已驳回",
+  INVOICE_PENDING: "待上传发票",
+  INVOICE_REVIEW: "发票审核中",
+  INVOICE_REJECTED: "发票已驳回",
+  CONFIRMED: "已确认",
+  VOIDED: "已作废",
+  CANCELLED: "已取消",
+};
+
+export interface AuditCustomerDetail {
+  userName?: string;
+  userEmail?: string;
+  userPhone?: string;
+  userUnit?: string;
+  applicationType?: string;
+  memberCategory?: string;
+  conferenceTitle?: string;
+  statusBefore?: string;
+  statusAfter?: string;
+  reviewComment?: string;
+}
+
+function labelStatus(code?: string | null): string | undefined {
+  if (!code) return undefined;
+  return AUDIT_STATUS_LABEL[code] ?? code;
+}
+
+/** 将摘要中的英文状态码与技术 ID 转为可读中文 */
+export function formatAuditSummary(summary: string): string {
+  let text = summary.replace(/[（(][^）)]*(?:Id|id)=\d+[^）)]*[）)]/g, "");
+  text = text.replace(/\b([A-Z][A-Z0-9_]*)\b/g, (match) => AUDIT_STATUS_LABEL[match] ?? match);
+  return text.trim();
+}
+
+/** 解析审计详情 JSON，兼容新旧格式 */
+export function parseAuditDetail(json?: string | null): AuditCustomerDetail | null {
+  if (!json) return null;
+  try {
+    const raw = JSON.parse(json) as Record<string, unknown>;
+    if (typeof raw !== "object" || raw === null) return null;
+
+    if (raw.statusBefore || raw.statusAfter || raw.userName || raw.userEmail) {
+      return {
+        userName: typeof raw.userName === "string" ? raw.userName : undefined,
+        userEmail: typeof raw.userEmail === "string" ? raw.userEmail : undefined,
+        userPhone: typeof raw.userPhone === "string" ? raw.userPhone : undefined,
+        userUnit: typeof raw.userUnit === "string" ? raw.userUnit : undefined,
+        applicationType: typeof raw.applicationType === "string" ? raw.applicationType : undefined,
+        memberCategory: typeof raw.memberCategory === "string" ? raw.memberCategory : undefined,
+        conferenceTitle: typeof raw.conferenceTitle === "string" ? raw.conferenceTitle : undefined,
+        statusBefore: typeof raw.statusBefore === "string" ? raw.statusBefore : labelStatus(raw.beforeStatus as string),
+        statusAfter: typeof raw.statusAfter === "string" ? raw.statusAfter : labelStatus(raw.afterStatus as string),
+        reviewComment:
+          typeof raw.reviewComment === "string"
+            ? raw.reviewComment
+            : typeof raw.comment === "string"
+              ? raw.comment
+              : undefined,
+      };
+    }
+
+    return {
+      statusBefore: labelStatus(raw.beforeStatus as string),
+      statusAfter: labelStatus(raw.afterStatus as string),
+      reviewComment: typeof raw.comment === "string" ? raw.comment : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   await ensureCmsAuth();
   const headers = new Headers(options.headers);

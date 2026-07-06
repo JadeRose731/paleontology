@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRoute } from "wouter";
+import { useRoute, useLocation } from "wouter";
 import { useAdmin } from "@/contexts/AdminContext";
 import { ALL_SOCIETY_UNITS } from "@shared/constants";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,13 +21,32 @@ import {
   type CmsTechRewardItem, type CmsPartyArticle, type CmsPartyTopic, type CmsDownloadFile,
   type CmsTimelineNode, type CmsMediaItem, type CmsPublishArticle, type CmsPublicFile,
   CMS_STATUS_LABELS, CMS_BOARD_TYPE_LABELS, CMS_FILE_CATEGORY_LABELS,
-  CMS_PUBLIC_FILE_CATEGORY_LABELS, CMS_PUBLIC_FILE_FORMAT_HINTS,
-  GALLERY_CATEGORIES, SCIENCE_CATEGORIES, DOWNLOAD_CATEGORIES_SOCIETY,
+  CMS_PUBLIC_FILE_CATEGORY_LABELS, CMS_PUBLIC_FILE_FORMAT_HINTS, CMS_PUBLIC_FILE_EXT_MAP,
+  type CmsPublicFileCategory,
+  GALLERY_CATEGORIES, SCIENCE_CATEGORIES, DOWNLOAD_CATEGORIES_SOCIETY, DOWNLOAD_CATEGORIES_BRANCH, DOWNLOAD_CATEGORIES_PARTY,
   generateCmsId, fetchCmsDatabase, saveCmsDatabase, DEFAULT_CMS,
 } from "./cms-data";
+import {
+  INTRO_PERSONNEL_GROUPS,
+  INTRO_SECTIONS,
+  INTRO_PAGE_SECTIONS,
+  generateIntroPageCode,
+  isIntroPageCode,
+} from "@shared/intro-sections";
+import {
+  BRANCH_SITE_SECTIONS,
+  STRUCTURE_PAGE_CODES,
+  STRUCTURE_PAGE_LABELS,
+  generateStructurePageCode,
+  isStructurePageCode,
+  BRANCH_SECTION_ADMIN_HINT,
+} from "@shared/branch-site";
+import { INTL_TYPE_LABELS } from "@shared/service-content-sections";
+import { BRANCH_IDS, BRANCH_MAP } from "@shared/constants";
 import { CMS_SECTION_META, CMS_SECTIONS, PARTY_NAV_ITEMS } from "./cms-nav";
 import {
   createCmsChannel, updateCmsChannel, deleteCmsChannel, listCmsChannelTree,
+  uploadCmsMedia,
 } from "@/lib/cms-api";
 import {
   extractServiceCategories,
@@ -45,12 +64,42 @@ import {
 
 type CmsSection = (typeof CMS_SECTIONS)[number];
 
+function formatPublicFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function detectPublicFileMediaCategory(fileName: string): CmsPublicFileCategory {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  for (const cat of ["document", "audio", "video", "photo"] as const) {
+    if (CMS_PUBLIC_FILE_EXT_MAP[cat].includes(ext)) return cat;
+  }
+  return "document";
+}
+
+function titleFromFileName(fileName: string): string {
+  return fileName.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ");
+}
+
 export default function ContentManagement() {
   const [, params] = useRoute("/admin/cms/:section");
+  const [, setLocation] = useLocation();
   const { adminRole, adminBranchId, canAccess } = useAdmin();
   const isBranchScope = adminRole === "branch_admin" && !!adminBranchId;
 
   const rawSection = params?.section || "";
+
+  useEffect(() => {
+    if (rawSection === "downloads") {
+      setLocation("/admin/cms/public-files");
+      return;
+    }
+    if (rawSection === "international" || rawSection === "science" || rawSection === "tech-rewards") {
+      setLocation("/admin/cms/services");
+    }
+  }, [rawSection, setLocation]);
+
   const section = ((): CmsSection => {
     if (CMS_SECTIONS.includes(rawSection) && canAccess(`/admin/cms/${rawSection}`)) {
       return rawSection as CmsSection;
@@ -75,6 +124,7 @@ export default function ContentManagement() {
   const [editBanner, setEditBanner] = useState<CmsBanner | null>(null);
   const [editArticle, setEditArticle] = useState<{ kind: "news" | "announcements"; item: CmsArticle | null } | null>(null);
   const [editPage, setEditPage] = useState<CmsPage | null>(null);
+  const [editPageContext, setEditPageContext] = useState<"intro" | "structure" | null>(null);
   const [editPerson, setEditPerson] = useState<CmsPerson | null>(null);
   const [editGallery, setEditGallery] = useState<CmsGalleryPhoto | null>(null);
   const [editAward, setEditAward] = useState<CmsAward | null>(null);
@@ -91,7 +141,11 @@ export default function ContentManagement() {
   const [editPublish, setEditPublish] = useState<CmsPublishArticle | null>(null);
   const [publishBoardFilter, setPublishBoardFilter] = useState<string>("all");
   const [editPublicFile, setEditPublicFile] = useState<CmsPublicFile | null>(null);
+  const [publicFileUploading, setPublicFileUploading] = useState(false);
   const [publicFileCategoryFilter, setPublicFileCategoryFilter] = useState<string>("all");
+  const [branchCmsFilter, setBranchCmsFilter] = useState<string>(
+    () => (adminRole === "branch_admin" && adminBranchId ? adminBranchId : BRANCH_IDS[0] ?? ""),
+  );
   const [showFormatHints, setShowFormatHints] = useState<string | null>(null);
   const [servicesTab, setServicesTab] = useState<string>("");
   const [serviceCategories, setServiceCategories] = useState<ServiceCategory[]>([]);
@@ -219,6 +273,16 @@ export default function ContentManagement() {
     timeline: useMemo(() => db.timelineNodes.filter(t => matchesScope(t.branchId)).sort((a, b) => a.sort - b.sort), [db.timelineNodes, matchesScope]),
   };
 
+  const partyDownloads = useMemo(
+    () => db.downloadFiles.filter(d => d.scope === "party"),
+    [db.downloadFiles]
+  );
+
+  const scopedPublicFiles = useMemo(
+    () => db.publicFiles.filter(f => matchesScope(f.branchId ?? null)),
+    [db.publicFiles, matchesScope]
+  );
+
   const partyArticles = useMemo(() => {
     let list = db.partyArticles;
     if (partyColumnFilter !== "all") list = list.filter(a => a.column === partyColumnFilter);
@@ -235,6 +299,51 @@ export default function ContentManagement() {
     [scoped.pages]
   );
 
+  const activeBranchId = isBranchScope ? adminBranchId! : branchCmsFilter;
+
+  const branchScoped = useMemo(() => ({
+    news: db.news.filter(a => a.branchId === activeBranchId),
+    announcements: db.announcements.filter(a => a.branchId === activeBranchId),
+    personnel: db.personnel.filter(p => p.branchId === activeBranchId),
+    timeline: db.timelineNodes.filter(t => t.branchId === activeBranchId),
+    gallery: db.galleryPhotos.filter(g => g.branchId === activeBranchId),
+    science: db.scienceItems.filter(s => s.branchId === activeBranchId),
+    awards: db.awards.filter(a => a.branchId === activeBranchId),
+    publicFiles: db.publicFiles.filter(f => f.branchId === activeBranchId && !f.deleted),
+    overviewPage: db.pages.find(p => p.code === "branch_overview" && p.branchId === activeBranchId),
+  }), [db, activeBranchId]);
+
+  const introPagesList = useMemo(() => {
+    const societyIntroPages = scoped.pages.filter(p => !p.branchId && isIntroPageCode(p.code));
+    const knownCodes = new Set(INTRO_PAGE_SECTIONS.map(s => s.pageCode));
+    const rows: { code: string; title: string; page?: CmsPage; preset: boolean }[] = [];
+
+    for (const s of INTRO_PAGE_SECTIONS) {
+      const page = societyIntroPages.find(p => p.code === s.pageCode);
+      rows.push({ code: s.pageCode, title: page?.title ?? s.title, page, preset: true });
+    }
+    for (const p of societyIntroPages) {
+      if (!knownCodes.has(p.code)) {
+        rows.push({ code: p.code, title: p.title, page: p, preset: false });
+      }
+    }
+    return rows;
+  }, [scoped.pages]);
+
+  const introPageCodes = useMemo(() => scoped.pages.filter(p => !p.branchId).map(p => p.code), [scoped.pages]);
+
+  const structurePagesList = useMemo(() => {
+    return STRUCTURE_PAGE_CODES.map(code => {
+      const page = scoped.pages.find(p => p.code === code && !p.branchId);
+      return {
+        code,
+        title: page?.title ?? STRUCTURE_PAGE_LABELS[code] ?? code,
+        page,
+        preset: true as const,
+      };
+    });
+  }, [scoped.pages]);
+
   const filteredMedia = useMemo(() => {
     return db.media.filter(m => {
       if (mediaCategory !== "all" && m.category !== mediaCategory) return false;
@@ -244,6 +353,32 @@ export default function ContentManagement() {
   }, [db.media, mediaSearch, mediaCategory]);
 
   const pageMeta = CMS_SECTION_META[isServicesView ? "services" : section] ?? CMS_SECTION_META.banners;
+
+  const handlePublicFileUpload = useCallback(async (file: File) => {
+    setPublicFileUploading(true);
+    try {
+      const mediaCategory = detectPublicFileMediaCategory(file.name);
+      const entry = await uploadCmsMedia(file, file.name, mediaCategory);
+      const url = entry.mediaUrl ?? entry.fileUrl ?? "";
+      if (!url) throw new Error("上传成功但未返回文件地址");
+      setEditPublicFile(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          category: mediaCategory,
+          fileName: file.name,
+          fileSize: formatPublicFileSize(file.size),
+          fileUrl: url,
+          title: prev.title || titleFromFileName(file.name),
+        };
+      });
+      toast.success("文件已上传，已自动填写原始文件名、大小与地址");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "文件上传失败");
+    } finally {
+      setPublicFileUploading(false);
+    }
+  }, []);
 
   const articleOps = (kind: "news" | "announcements") => ({
     onTogglePin: (id: string) => {
@@ -419,33 +554,169 @@ export default function ContentManagement() {
               </Table>
             </CardContent>
           </Card>
+          <Card>
+            <CardHeader className="flex flex-row justify-between">
+              <div>
+                <CardTitle className="text-base">下载中心文件</CardTitle>
+                <CardDescription>对应前台党建文化「下载中心」栏目，仅党建资料</CardDescription>
+              </div>
+              <Button size="sm" onClick={() => setEditDownload({ id: generateCmsId("dl"), title: "", category: DOWNLOAD_CATEGORIES_PARTY[0], fileName: "", fileUrl: "", memberOnly: false, branchId: null, scope: "party" })}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> 上传文件
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>分类</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {partyDownloads.map(d => (
+                    <TableRow key={d.id}>
+                      <TableCell className="font-medium">{d.title}</TableCell>
+                      <TableCell>{d.category}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" onClick={() => setEditDownload({ ...d })}><Edit className="h-3.5 w-3.5" /></Button>
+                        <DeleteButton title={d.title} onConfirm={() => { persist({ ...db, downloadFiles: db.downloadFiles.filter(x => x.id !== d.id) }); toast.success("已删除"); }} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </div>
       )}
 
       {(section === "pages" || section === "awards") && (
         <Tabs defaultValue={section === "awards" ? "awards" : "pages"} className="space-y-4">
           <TabsList>
-            <TabsTrigger value="pages">页面内容</TabsTrigger>
+            <TabsTrigger value="pages">富文本页面</TabsTrigger>
+            <TabsTrigger value="personnel-intro">领导机构</TabsTrigger>
             <TabsTrigger value="awards">获奖成果</TabsTrigger>
           </TabsList>
           <TabsContent value="pages">
             <Card>
-              <CardHeader className="flex flex-row justify-between">
-                <div><CardTitle className="text-base">页面列表</CardTitle><CardDescription>学会简介相关富文本页面（学会背景、宗旨与任务、学科贡献等）</CardDescription></div>
-                <Button size="sm" onClick={() => setEditPage({ id: generateCmsId("page"), code: "", title: "", content: "<p></p>", status: "draft", branchId: isBranchScope ? adminBranchId! : null, updatedAt: new Date().toISOString().split("T")[0], pageType: isBranchScope ? "branch" : "richtext" })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增</Button>
+              <CardHeader className="flex flex-row items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="text-base">学会简介页面</CardTitle>
+                  <CardDescription>
+                    与前台学会简介左侧目录一一对应，所有子栏目在同一页面展示。历史沿革、历史相册请在「学会沿革」「历史相册」栏目维护内容。
+                  </CardDescription>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setEditPageContext("intro");
+                    setEditPage({
+                    id: generateCmsId("page"),
+                    code: "",
+                    title: "",
+                    content: "<p></p>",
+                    status: "draft",
+                    branchId: null,
+                    updatedAt: new Date().toISOString().split("T")[0],
+                    pageType: "richtext",
+                  }); }}
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" /> 新增子栏目
+                </Button>
               </CardHeader>
               <CardContent>
                 <Table>
-                  <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>归属</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>子栏目</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
                   <TableBody>
-                    {scoped.pages.filter(p => p.code.startsWith("intro_")).map(p => (
-                      <TableRow key={p.id}>
-                        <TableCell className="font-medium">{p.title}</TableCell>
-                        <TableCell>{scopeLabel(p.branchId)}</TableCell>
-                        <TableCell><Badge variant="outline" className={statusBadgeClass(p.status)}>{CMS_STATUS_LABELS[p.status]}</Badge></TableCell>
+                    {introPagesList.map(row => (
+                      <TableRow key={row.code}>
+                        <TableCell className="font-medium">{row.title}</TableCell>
+                        <TableCell>
+                          {row.page ? (
+                            <Badge variant="outline" className={statusBadgeClass(row.page.status)}>{CMS_STATUS_LABELS[row.page.status]}</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-amber-700 border-amber-300">未创建</Badge>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => setEditPage({ ...p })}><Edit className="h-3.5 w-3.5" /></Button>
-                          <DeleteButton title={p.title} onConfirm={() => { persist({ ...db, pages: db.pages.filter(x => x.id !== p.id) }); toast.success("已删除"); }} />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditPageContext("intro");
+                              setEditPage(row.page ?? {
+                                id: generateCmsId("page"),
+                                code: row.code,
+                                title: row.title,
+                                content: "<p></p>",
+                                status: "draft",
+                                branchId: null,
+                                updatedAt: new Date().toISOString().split("T")[0],
+                                pageType: "richtext",
+                              });
+                            }}
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                          {row.page && !row.preset && (
+                            <DeleteButton title={row.page.title} onConfirm={() => { persist({ ...db, pages: db.pages.filter(x => x.id !== row.page!.id) }); toast.success("已删除"); }} />
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+            <Card className="mt-4 border-dashed">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">其他子栏目说明</CardTitle>
+              </CardHeader>
+              <CardContent className="text-xs text-muted-foreground space-y-2">
+                {INTRO_SECTIONS.filter(s => s.kind === "personnel").map(s => (
+                  <p key={s.id}>· <strong>{s.title}</strong>：在「领导机构」Tab 维护，前台同页展示</p>
+                ))}
+                {INTRO_SECTIONS.filter(s => s.kind === "timeline").map(s => (
+                  <p key={s.id}>· <strong>{s.title}</strong>：在「学会沿革」栏目维护，前台同页展示</p>
+                ))}
+                {INTRO_SECTIONS.filter(s => s.kind === "gallery").map(s => (
+                  <p key={s.id}>· <strong>{s.title}</strong>：在「历史相册」栏目维护，前台同页展示</p>
+                ))}
+                {INTRO_SECTIONS.filter(s => s.kind === "branches").map(s => (
+                  <p key={s.id}>· <strong>{s.title}</strong>：前台同页展示分会列表，链接至组织机构分会子站</p>
+                ))}
+                {INTRO_SECTIONS.filter(s => s.kind === "awards").map(s => (
+                  <p key={s.id}>· <strong>{s.title}</strong>：在「获奖成果」Tab 维护，前台同页展示</p>
+                ))}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="personnel-intro">
+            <Card>
+              <CardHeader className="flex flex-row justify-between">
+                <div>
+                  <CardTitle className="text-base">领导机构人员</CardTitle>
+                  <CardDescription>现任领导、历任领导、理事会、监事会、秘书处 — 与前台学会简介及组织机构同步</CardDescription>
+                </div>
+                <Button size="sm" onClick={() => setEditPerson({ id: generateCmsId("person"), name: "", title: "", group: INTRO_PERSONNEL_GROUPS[0], bio: "", photoUrl: "", sort: scoped.personnel.length + 1, branchId: null })}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> 新增
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader><TableRow><TableHead>姓名</TableHead><TableHead>职务</TableHead><TableHead>分组</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {scoped.personnel
+                      .filter(p => INTRO_PERSONNEL_GROUPS.includes(p.group))
+                      .map(p => (
+                      <TableRow key={p.id}>
+                        <TableCell className="font-medium">{p.name}</TableCell>
+                        <TableCell>{p.title}</TableCell>
+                        <TableCell>{p.group}</TableCell>
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => setEditPerson({ ...p })}><Edit className="h-3.5 w-3.5" /></Button>
+                          <DeleteButton title={p.name} onConfirm={() => { persist({ ...db, personnel: db.personnel.filter(x => x.id !== p.id) }); toast.success("已删除"); }} />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -486,23 +757,50 @@ export default function ContentManagement() {
 
       {section === "personnel" && (
           <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <div><CardTitle className="text-base">人员列表</CardTitle><CardDescription>领导、理事会、监事会与秘书处成员</CardDescription></div>
-              <Button size="sm" onClick={() => setEditPerson({ id: generateCmsId("person"), name: "", title: "", group: "现任领导", bio: "", photoUrl: "", sort: scoped.personnel.length + 1, branchId: isBranchScope ? adminBranchId! : null })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增</Button>
+            <CardHeader>
+              <CardTitle className="text-base">组织机构页面</CardTitle>
+              <CardDescription>与前台「组织机构」右侧「组织机构」「管理系列」同步；人员信息请在「学会简介 → 领导机构」维护</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
-                <TableHeader><TableRow><TableHead>姓名</TableHead><TableHead>职务</TableHead><TableHead>分组</TableHead><TableHead>照片</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>子栏目</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
                 <TableBody>
-                  {scoped.personnel.map(p => (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-medium">{p.name}</TableCell>
-                      <TableCell>{p.title}</TableCell>
-                      <TableCell>{p.group}</TableCell>
-                      <TableCell>{p.photoUrl ? "已上传" : "—"}</TableCell>
+                  {structurePagesList.map(row => (
+                    <TableRow key={row.code}>
+                      <TableCell className="font-medium">{row.title}</TableCell>
+                      <TableCell>
+                        {row.page ? (
+                          <Badge variant="outline" className={statusBadgeClass(row.page.status)}>{CMS_STATUS_LABELS[row.page.status]}</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-amber-700 border-amber-300">未创建</Badge>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditPerson({ ...p })}><Edit className="h-3.5 w-3.5" /></Button>
-                        <DeleteButton title={p.name} onConfirm={() => { persist({ ...db, personnel: db.personnel.filter(x => x.id !== p.id) }); toast.success("已删除"); }} />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditPageContext("structure");
+                            setEditPage(row.page ?? {
+                              id: generateCmsId("page"),
+                              code: row.code,
+                              title: row.title,
+                              content: "<p></p>",
+                              status: "draft",
+                              branchId: null,
+                              updatedAt: new Date().toISOString().split("T")[0],
+                              pageType: "richtext",
+                            });
+                          }}
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -649,7 +947,7 @@ export default function ContentManagement() {
                       <CardHeader className="flex flex-row justify-between">
                         <div>
                           <CardTitle className="text-base">{cat.navName}</CardTitle>
-                          <CardDescription>{cat.subtitle ?? "交流动态、国际会议、重要报告与合作机构"}</CardDescription>
+                          <CardDescription>{cat.subtitle ?? "交流动态、国际会议、国际会议组织与国际会议合作机构"}</CardDescription>
                         </div>
                         <Button size="sm" onClick={() => setEditIntl({ id: generateCmsId("intl"), title: "", type: "news", summary: "", content: "<p></p>", linkUrl: "", logoUrl: "", status: "draft", publishDate: new Date().toISOString().split("T")[0] })}><Plus className="h-3.5 w-3.5 mr-1" /> 新建</Button>
                       </CardHeader>
@@ -661,7 +959,7 @@ export default function ContentManagement() {
                               <TableRow key={i.id}>
                                 <TableCell className="font-medium">{i.title}</TableCell>
                                 <TableCell>
-                                  {i.type === "news" ? "交流动态" : i.type === "conference" ? "国际会议" : i.type === "report" ? "重要报告" : "合作机构"}
+                                  {INTL_TYPE_LABELS[i.type] ?? i.type}
                                 </TableCell>
                                 <TableCell><Badge variant="outline" className={statusBadgeClass(i.status)}>{CMS_STATUS_LABELS[i.status]}</Badge></TableCell>
                                 <TableCell className="text-right">
@@ -731,34 +1029,6 @@ export default function ContentManagement() {
                       <TableCell className="text-right">
                         <Button variant="ghost" size="sm" onClick={() => setEditTimeline({ ...t })}><Edit className="h-3.5 w-3.5" /></Button>
                         <DeleteButton title={t.title} onConfirm={() => { persist({ ...db, timelineNodes: db.timelineNodes.filter(x => x.id !== t.id) }); toast.success("已删除"); }} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-      )}
-
-      {section === "downloads" && (
-          <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <div><CardTitle className="text-base">文件列表</CardTitle><CardDescription>上传资料文件，可限制仅有效会员下载</CardDescription></div>
-              <Button size="sm" onClick={() => setEditDownload({ id: generateCmsId("dl"), title: "", category: isBranchScope ? "会议简讯" : DOWNLOAD_CATEGORIES_SOCIETY[0], fileName: "", fileUrl: "", memberOnly: false, branchId: isBranchScope ? adminBranchId! : null, scope: isBranchScope ? "branch" : "society" })}><Plus className="h-3.5 w-3.5 mr-1" /> 上传文件</Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>分类</TableHead><TableHead>范围</TableHead><TableHead>权限</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {scoped.downloads.map(d => (
-                    <TableRow key={d.id}>
-                      <TableCell className="font-medium">{d.title}</TableCell>
-                      <TableCell>{d.category}</TableCell>
-                      <TableCell>{d.scope === "party" ? "党建" : scopeLabel(d.branchId)}</TableCell>
-                      <TableCell><MemberOnlyBadge memberOnly={d.memberOnly} /></TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => setEditDownload({ ...d })}><Edit className="h-3.5 w-3.5" /></Button>
-                        <DeleteButton title={d.title} onConfirm={() => { persist({ ...db, downloadFiles: db.downloadFiles.filter(x => x.id !== d.id) }); toast.success("已删除"); }} />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -911,27 +1181,247 @@ export default function ContentManagement() {
       )}
 
       {section === "branch" && (
-          <Card>
-            <CardHeader className="flex flex-row justify-between">
-              <div><CardTitle className="text-base">分会页面</CardTitle><CardDescription>对应前台「组织机构」中的分会子站点内容</CardDescription></div>
-              <Button size="sm" onClick={() => setEditPage({ id: generateCmsId("page"), code: "branch_page", title: "", content: "<p></p>", status: "draft", branchId: isBranchScope ? adminBranchId! : null, updatedAt: new Date().toISOString().split("T")[0], pageType: "branch" })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增页面</Button>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>归属</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
-                <TableBody>
-                  {branchPages.map(p => (
-                    <TableRow key={p.id}>
-                      <TableCell className="font-medium">{p.title}</TableCell>
-                      <TableCell>{scopeLabel(p.branchId)}</TableCell>
-                      <TableCell><Badge variant="outline" className={statusBadgeClass(p.status)}>{CMS_STATUS_LABELS[p.status]}</Badge></TableCell>
-                      <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => setEditPage({ ...p })}><Edit className="h-3.5 w-3.5" /></Button></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+        <div className="space-y-4">
+          {!isBranchScope && (
+            <Card>
+              <CardContent className="pt-6 flex flex-wrap items-center gap-3">
+                <Label className="text-sm font-bold shrink-0">选择分会</Label>
+                <Select value={branchCmsFilter} onValueChange={setBranchCmsFilter}>
+                  <SelectTrigger className="w-[280px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {BRANCH_IDS.map(id => (
+                      <SelectItem key={id} value={id}>{BRANCH_MAP[id]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">管理 {BRANCH_MAP[activeBranchId] ?? activeBranchId} 子站内容</p>
+              </CardContent>
+            </Card>
+          )}
+
+          <Tabs defaultValue="overview" className="space-y-4">
+            <TabsList className="flex flex-wrap h-auto gap-1">
+              {BRANCH_SITE_SECTIONS.map(s => (
+                <TabsTrigger key={s.id} value={s.id} className="text-xs">{s.title}</TabsTrigger>
+              ))}
+            </TabsList>
+
+            <TabsContent value="overview">
+              <Card>
+                <CardHeader className="flex flex-row justify-between">
+                  <div>
+                    <CardTitle className="text-base">分会概况</CardTitle>
+                    <CardDescription>{BRANCH_SECTION_ADMIN_HINT.overview}</CardDescription>
+                  </div>
+                  <Button size="sm" onClick={() => setEditPage(branchScoped.overviewPage ?? {
+                    id: generateCmsId("page"),
+                    code: "branch_overview",
+                    title: "分会概况",
+                    content: "<p></p>",
+                    status: "draft",
+                    branchId: activeBranchId,
+                    updatedAt: new Date().toISOString().split("T")[0],
+                    pageType: "branch",
+                  })}><Edit className="h-3.5 w-3.5 mr-1" /> 编辑</Button>
+                </CardHeader>
+                <CardContent>
+                  {branchScoped.overviewPage ? (
+                    <p className="text-sm text-muted-foreground">状态：{CMS_STATUS_LABELS[branchScoped.overviewPage.status]} · 更新于 {branchScoped.overviewPage.updatedAt}</p>
+                  ) : (
+                    <p className="text-sm text-amber-700">尚未创建分会概况页面，点击「编辑」初始化。</p>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="home">
+              <ArticleSection
+                title="首页 · 重大科研进展"
+                description={BRANCH_SECTION_ADMIN_HINT.home}
+                items={branchScoped.news.filter(n => n.showOnHomepage || n.category === "重大科研进展" || n.category === "科研进展")}
+                onEdit={item => setEditArticle({ kind: "news", item })}
+                onPreview={setPreviewArticle}
+                onAdd={() => setEditArticle({ kind: "news", item: { id: generateCmsId("news"), title: "", category: "重大科研进展", summary: "", content: "<p></p>", status: "draft", pinned: false, publishDate: new Date().toISOString().split("T")[0], branchId: activeBranchId, scope: "branch", attachments: [], showOnHomepage: true } })}
+                {...articleOps("news")}
+              />
+            </TabsContent>
+
+            <TabsContent value="council">
+              <Card>
+                <CardHeader className="flex flex-row justify-between">
+                  <div><CardTitle className="text-base">理事会</CardTitle><CardDescription>{BRANCH_SECTION_ADMIN_HINT.council}</CardDescription></div>
+                  <Button size="sm" onClick={() => setEditPerson({ id: generateCmsId("person"), name: "", title: "", group: "理事会", bio: "", photoUrl: "", sort: branchScoped.personnel.length + 1, branchId: activeBranchId })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增</Button>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>姓名</TableHead><TableHead>职务</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {branchScoped.personnel.filter(p => p.group === "理事会").map(p => (
+                        <TableRow key={p.id}>
+                          <TableCell className="font-medium">{p.name}</TableCell>
+                          <TableCell>{p.title}</TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm" onClick={() => setEditPerson({ ...p })}><Edit className="h-3.5 w-3.5" /></Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="work">
+              <ArticleSection
+                title="工作动态"
+                description={BRANCH_SECTION_ADMIN_HINT.work}
+                items={branchScoped.news.filter(n => n.category === "工作动态")}
+                onEdit={item => setEditArticle({ kind: "news", item })}
+                onPreview={setPreviewArticle}
+                onAdd={() => setEditArticle({ kind: "news", item: { id: generateCmsId("news"), title: "", category: "工作动态", summary: "", content: "<p></p>", status: "draft", pinned: false, publishDate: new Date().toISOString().split("T")[0], branchId: activeBranchId, scope: "branch", attachments: [], showOnHomepage: false } })}
+                {...articleOps("news")}
+              />
+            </TabsContent>
+
+            <TabsContent value="announcements">
+              <ArticleSection
+                title="通知公告"
+                description={BRANCH_SECTION_ADMIN_HINT.announcements}
+                items={branchScoped.announcements}
+                onEdit={item => setEditArticle({ kind: "announcements", item })}
+                onPreview={setPreviewArticle}
+                onAdd={() => setEditArticle({ kind: "announcements", item: { id: generateCmsId("ann"), title: "", category: "组织工作", summary: "", content: "<p></p>", status: "draft", pinned: false, publishDate: new Date().toISOString().split("T")[0], branchId: activeBranchId, scope: "branch", attachments: [], showOnHomepage: false } })}
+                {...articleOps("announcements")}
+              />
+            </TabsContent>
+
+            <TabsContent value="history">
+              <Card>
+                <CardHeader className="flex flex-row justify-between">
+                  <div><CardTitle className="text-base">历史沿革</CardTitle><CardDescription>{BRANCH_SECTION_ADMIN_HINT.history}</CardDescription></div>
+                  <Button size="sm" onClick={() => setEditTimeline({ id: generateCmsId("tl"), year: "", title: "", description: "", imageUrl: "", sort: branchScoped.timeline.length + 1, branchId: activeBranchId })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增节点</Button>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>年份</TableHead><TableHead>标题</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {branchScoped.timeline.sort((a, b) => a.sort - b.sort).map(t => (
+                        <TableRow key={t.id}>
+                          <TableCell>{t.year}</TableCell>
+                          <TableCell>{t.title}</TableCell>
+                          <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => setEditTimeline({ ...t })}><Edit className="h-3.5 w-3.5" /></Button></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="gallery">
+              <Card>
+                <CardHeader className="flex flex-row justify-between">
+                  <div><CardTitle className="text-base">历史相册</CardTitle><CardDescription>{BRANCH_SECTION_ADMIN_HINT.gallery}</CardDescription></div>
+                  <Button size="sm" onClick={() => setEditGallery({ id: generateCmsId("gal"), title: "", category: GALLERY_CATEGORIES[0], imageUrl: "", sort: branchScoped.gallery.length + 1, branchId: activeBranchId })}><Plus className="h-3.5 w-3.5 mr-1" /> 上传照片</Button>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>分类</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {branchScoped.gallery.map(g => (
+                        <TableRow key={g.id}>
+                          <TableCell>{g.title}</TableCell>
+                          <TableCell>{g.category}</TableCell>
+                          <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => setEditGallery({ ...g })}><Edit className="h-3.5 w-3.5" /></Button></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="science">
+              <Card>
+                <CardHeader className="flex flex-row justify-between">
+                  <div><CardTitle className="text-base">科学传播</CardTitle><CardDescription>{BRANCH_SECTION_ADMIN_HINT.science}</CardDescription></div>
+                  <Button size="sm" onClick={() => setEditScience({ id: generateCmsId("sci"), title: "", format: "article", category: SCIENCE_CATEGORIES[0], summary: "", content: "<p></p>", externalUrl: "", status: "draft", branchId: activeBranchId, publishDate: new Date().toISOString().split("T")[0] })}><Plus className="h-3.5 w-3.5 mr-1" /> 新建</Button>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>分类</TableHead><TableHead>状态</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {branchScoped.science.map(s => (
+                        <TableRow key={s.id}>
+                          <TableCell className="font-medium">{s.title}</TableCell>
+                          <TableCell>{s.category}</TableCell>
+                          <TableCell><Badge variant="outline" className={statusBadgeClass(s.status)}>{CMS_STATUS_LABELS[s.status]}</Badge></TableCell>
+                          <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => setEditScience({ ...s })}><Edit className="h-3.5 w-3.5" /></Button></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="awards">
+              <Card>
+                <CardHeader className="flex flex-row justify-between">
+                  <div><CardTitle className="text-base">获奖成果</CardTitle><CardDescription>{BRANCH_SECTION_ADMIN_HINT.awards}</CardDescription></div>
+                  <Button size="sm" onClick={() => setEditAward({ id: generateCmsId("award"), year: new Date().getFullYear().toString(), awardName: "", winner: "", description: "", branchId: activeBranchId })}><Plus className="h-3.5 w-3.5 mr-1" /> 新增</Button>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>年份</TableHead><TableHead>奖项</TableHead><TableHead>获奖人</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {branchScoped.awards.map(a => (
+                        <TableRow key={a.id}>
+                          <TableCell>{a.year}</TableCell>
+                          <TableCell>{a.awardName}</TableCell>
+                          <TableCell>{a.winner}</TableCell>
+                          <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => setEditAward({ ...a })}><Edit className="h-3.5 w-3.5" /></Button></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="downloads">
+              <Card>
+                <CardHeader className="flex flex-row justify-between">
+                  <div>
+                    <CardTitle className="text-base">下载中心</CardTitle>
+                    <CardDescription>分类：{DOWNLOAD_CATEGORIES_BRANCH.join("、")}（{BRANCH_SECTION_ADMIN_HINT.downloads}）</CardDescription>
+                  </div>
+                  <Button size="sm" onClick={() => setEditPublicFile({
+                    id: generateCmsId("pf"), title: "", category: "document", subjectCategory: DOWNLOAD_CATEGORIES_BRANCH[0],
+                    fileName: "", fileUrl: "", fileSize: "", remark: "", downloadCount: 0,
+                    uploadDate: new Date().toISOString().split("T")[0], deleted: false,
+                    memberOnly: false, branchId: activeBranchId,
+                  })}><Plus className="h-3.5 w-3.5 mr-1" /> 上传文件</Button>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader><TableRow><TableHead>标题</TableHead><TableHead>分类</TableHead><TableHead>文件名</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+                    <TableBody>
+                      {branchScoped.publicFiles.map(f => (
+                        <TableRow key={f.id}>
+                          <TableCell className="font-medium">{f.title}</TableCell>
+                          <TableCell>{f.subjectCategory}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{f.fileName}</TableCell>
+                          <TableCell className="text-right"><Button variant="ghost" size="sm" onClick={() => setEditPublicFile({ ...f })}><Edit className="h-3.5 w-3.5" /></Button></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
       )}
 
       {/* ── 公开文件下载区管理 ── */}
@@ -1000,7 +1490,7 @@ export default function ContentManagement() {
             <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-3">
               <div>
                 <CardTitle className="text-base">公开文件列表</CardTitle>
-                <CardDescription>所有文件无需登录即可下载；按分类筛选管理</CardDescription>
+                <CardDescription>统一管理公开文件与学会资料下载，无需登录即可下载（会员专属文件除外）</CardDescription>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <Select value={publicFileCategoryFilter} onValueChange={setPublicFileCategoryFilter}>
@@ -1013,9 +1503,10 @@ export default function ContentManagement() {
                   </SelectContent>
                 </Select>
                 <Button size="sm" onClick={() => setEditPublicFile({
-                  id: generateCmsId("pf"), title: "", category: "document", fileName: "",
-                  fileUrl: "", fileSize: "", remark: "", downloadCount: 0,
+                  id: generateCmsId("pf"), title: "", category: "document", subjectCategory: isBranchScope ? "会议简讯" : DOWNLOAD_CATEGORIES_SOCIETY[0],
+                  fileName: "", fileUrl: "", fileSize: "", remark: "", downloadCount: 0,
                   uploadDate: new Date().toISOString().split("T")[0], deleted: false,
+                  memberOnly: false, branchId: isBranchScope ? adminBranchId! : null,
                 })}>
                   <Plus className="h-3.5 w-3.5 mr-1" /> 上传文件
                 </Button>
@@ -1025,17 +1516,18 @@ export default function ContentManagement() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>分类</TableHead>
+                    <TableHead>媒体类型</TableHead>
+                    <TableHead>资料分类</TableHead>
                     <TableHead>文件名称</TableHead>
+                    <TableHead>归属</TableHead>
+                    <TableHead>权限</TableHead>
                     <TableHead>大小</TableHead>
-                    <TableHead>下载数</TableHead>
                     <TableHead>上传日期</TableHead>
-                    <TableHead>备注</TableHead>
                     <TableHead className="text-right">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {db.publicFiles
+                  {scopedPublicFiles
                     .filter(f => !f.deleted && (publicFileCategoryFilter === "all" || f.category === publicFileCategoryFilter))
                     .sort((a, b) => b.uploadDate.localeCompare(a.uploadDate))
                     .map(f => (
@@ -1048,16 +1540,17 @@ export default function ContentManagement() {
                           "text-amber-700 border-amber-200 bg-amber-50"
                         }>{CMS_PUBLIC_FILE_CATEGORY_LABELS[f.category]}</Badge>
                       </TableCell>
+                      <TableCell className="text-sm">{f.subjectCategory || "—"}</TableCell>
                       <TableCell>
                         <div>
                           <p className="font-medium text-sm max-w-[200px] truncate" title={f.title}>{f.title}</p>
                           <p className="text-xs text-muted-foreground font-mono">{f.fileName}</p>
                         </div>
                       </TableCell>
+                      <TableCell className="text-sm">{scopeLabel(f.branchId ?? null)}</TableCell>
+                      <TableCell><MemberOnlyBadge memberOnly={!!f.memberOnly} /></TableCell>
                       <TableCell className="text-xs text-muted-foreground">{f.fileSize || "—"}</TableCell>
-                      <TableCell className="text-sm">{f.downloadCount}</TableCell>
                       <TableCell className="text-sm">{f.uploadDate}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground max-w-[120px] truncate" title={f.remark}>{f.remark || "—"}</TableCell>
                       <TableCell className="text-right flex justify-end gap-0.5">
                         <Button variant="ghost" size="sm" onClick={() => setEditPublicFile({ ...f })}>
                           <Edit className="h-3.5 w-3.5" />
@@ -1069,8 +1562,8 @@ export default function ContentManagement() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {db.publicFiles.filter(f => !f.deleted && (publicFileCategoryFilter === "all" || f.category === publicFileCategoryFilter)).length === 0 && (
-                    <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">暂无文件，点击「上传文件」添加</TableCell></TableRow>
+                  {scopedPublicFiles.filter(f => !f.deleted && (publicFileCategoryFilter === "all" || f.category === publicFileCategoryFilter)).length === 0 && (
+                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">暂无文件，点击「上传文件」添加</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -1088,7 +1581,7 @@ export default function ContentManagement() {
           {editPublicFile && (
             <div className="space-y-3">
               <div className="space-y-2">
-                <Label>文件分类 <span className="text-red-500">*</span></Label>
+                <Label>媒体类型 <span className="text-red-500">*</span></Label>
                 <Select value={editPublicFile.category} onValueChange={v => setEditPublicFile({ ...editPublicFile, category: v as typeof editPublicFile.category })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1108,9 +1601,44 @@ export default function ContentManagement() {
                   ✦ {CMS_PUBLIC_FILE_FORMAT_HINTS[editPublicFile.category].formats}
                 </p>
               </div>
+              {editPublicFile.category === "document" && (
+                <div className="space-y-2">
+                  <Label>资料分类</Label>
+                  <Select
+                    value={editPublicFile.subjectCategory || DOWNLOAD_CATEGORIES_SOCIETY[0]}
+                    onValueChange={v => setEditPublicFile({ ...editPublicFile, subjectCategory: v })}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(isBranchScope ? DOWNLOAD_CATEGORIES_BRANCH : DOWNLOAD_CATEGORIES_SOCIETY).map(c => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>文件名称（展示用） <span className="text-red-500">*</span></Label>
                 <Input value={editPublicFile.title} onChange={e => setEditPublicFile({ ...editPublicFile, title: e.target.value })} placeholder="如：2026年图片大赛参赛规则" />
+              </div>
+              <div className="space-y-2 rounded-lg border border-dashed border-[#E5E1DA] bg-slate-50/80 p-4">
+                <Label>选择本地文件上传</Label>
+                <Input
+                  type="file"
+                  className="text-xs bg-white"
+                  disabled={publicFileUploading}
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) void handlePublicFileUpload(file);
+                    e.target.value = "";
+                  }}
+                />
+                {publicFileUploading && (
+                  <p className="text-xs text-muted-foreground">上传中，请稍候…</p>
+                )}
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  上传成功后将自动识别媒体类型，并填写原始文件名、文件大小与文件地址。也可跳过上传，在下方手动填写 URL。
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
@@ -1130,6 +1658,10 @@ export default function ContentManagement() {
                 <Label>备注说明</Label>
                 <Textarea rows={2} value={editPublicFile.remark} onChange={e => setEditPublicFile({ ...editPublicFile, remark: e.target.value })} placeholder="适用场景或说明" />
               </div>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={!!editPublicFile.memberOnly} onCheckedChange={v => setEditPublicFile({ ...editPublicFile, memberOnly: !!v })} />
+                仅有效会员可下载
+              </label>
               <div className="bg-blue-50 border border-blue-200 rounded p-3 text-[10px] text-blue-700 space-y-1">
                 <p className="font-bold mb-1">格式转换建议（{CMS_PUBLIC_FILE_CATEGORY_LABELS[editPublicFile.category]}）：</p>
                 {CMS_PUBLIC_FILE_FORMAT_HINTS[editPublicFile.category].convert.map((tip, i) => (
@@ -1417,16 +1949,42 @@ export default function ContentManagement() {
       </Dialog>
 
       {/* Page dialog */}
-      <Dialog open={!!editPage} onOpenChange={o => !o && setEditPage(null)}>
-        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>编辑页面</DialogTitle></DialogHeader>
+      <Dialog open={!!editPage} onOpenChange={o => { if (!o) { setEditPage(null); setEditPageContext(null); } }}>
+        <DialogContent className="max-w-[90vw] w-full lg:max-w-5xl max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{editPage?.code ? "编辑子栏目" : "新增子栏目"}</DialogTitle><DialogDescription>填写标题与正文即可，系统自动处理技术标识。</DialogDescription></DialogHeader>
           {editPage && (<div className="space-y-3">
-            <div className="space-y-2"><Label>标题</Label><Input value={editPage.title} onChange={e => setEditPage({ ...editPage, title: e.target.value })} /></div>
-            {editPage.code && db.pages.some(p => p.id === editPage.id) && (
-              <div className="text-xs text-muted-foreground">系统编码：<code className="bg-muted px-1 py-0.5 rounded">{editPage.code}</code></div>
-            )}
+            <div className="space-y-2"><Label>子栏目标题</Label><Input value={editPage.title} onChange={e => setEditPage({ ...editPage, title: e.target.value })} placeholder="例如：学会概况" /></div>
             <RichTextEditor value={editPage.content} onChange={c => setEditPage({ ...editPage, content: c })} />
           </div>)}
-          <DialogFooter><Button variant="outline" onClick={() => setEditPage(null)}>取消</Button><Button onClick={() => { if (!editPage) return; const code = editPage.code || `intro_${editPage.title.replace(/\s+/g, "_").toLowerCase() || Date.now()}`; const page = { ...editPage, code, updatedAt: new Date().toISOString().split("T")[0], status: "published" as const }; persist({ ...db, pages: db.pages.some(p => p.id === page.id) ? db.pages.map(p => p.id === page.id ? page : p) : [...db.pages, page] }); setEditPage(null); toast.success("已发布"); }}>保存并发布</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => { setEditPage(null); setEditPageContext(null); }}>取消</Button><Button onClick={() => {
+            if (!editPage) return;
+            if (!editPage.title.trim()) { toast.error("请填写子栏目标题"); return; }
+            const allCodes = scoped.pages.map(p => p.code);
+            const isStructure = editPageContext === "structure" || isStructurePageCode(editPage.code);
+            const code = editPage.code || (
+              isStructure
+                ? generateStructurePageCode(editPage.title, allCodes)
+                : generateIntroPageCode(editPage.title, allCodes)
+            );
+            const page = {
+              ...editPage,
+              code,
+              title: editPage.title.trim(),
+              updatedAt: new Date().toISOString().split("T")[0],
+              status: "published" as const,
+              branchId: isStructure || editPageContext === "intro" ? null : editPage.branchId,
+              pageType: (isStructure || editPageContext === "intro" ? "richtext" : editPage.pageType) as CmsPage["pageType"],
+            };
+            const pageIdx = db.pages.findIndex(p =>
+              p.code === page.code || p.cmsEntryId === page.cmsEntryId || p.id === page.id,
+            );
+            const nextPages = pageIdx >= 0
+              ? db.pages.map((p, i) => (i === pageIdx ? { ...p, ...page, cmsEntryId: page.cmsEntryId ?? p.cmsEntryId } : p))
+              : [...db.pages, page];
+            persist({ ...db, pages: nextPages });
+            setEditPage(null);
+            setEditPageContext(null);
+            toast.success("已发布");
+          }}>保存并发布</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1437,6 +1995,18 @@ export default function ContentManagement() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2"><Label>姓名</Label><Input value={editPerson.name} onChange={e => setEditPerson({ ...editPerson, name: e.target.value })} /></div>
               <div className="space-y-2"><Label>职务</Label><Input value={editPerson.title} onChange={e => setEditPerson({ ...editPerson, title: e.target.value })} /></div>
+            </div>
+            <div className="space-y-2">
+              <Label>分组</Label>
+              <Select value={editPerson.group} onValueChange={v => setEditPerson({ ...editPerson, group: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {INTRO_PERSONNEL_GROUPS.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                  {!INTRO_PERSONNEL_GROUPS.includes(editPerson.group) && editPerson.group && (
+                    <SelectItem value={editPerson.group}>{editPerson.group}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
             </div>
             <ImageUploadField label="照片" value={editPerson.photoUrl} onChange={url => setEditPerson({ ...editPerson, photoUrl: url })} />
             <div className="space-y-2"><Label>简介</Label><Textarea rows={3} value={editPerson.bio} onChange={e => setEditPerson({ ...editPerson, bio: e.target.value })} /></div>
@@ -1497,7 +2067,7 @@ export default function ContentManagement() {
           <div className="space-y-3">
             <Input value={editIntl.title} onChange={e => setEditIntl({ ...editIntl, title: e.target.value })} />
             <Select value={editIntl.type} onValueChange={v => setEditIntl({ ...editIntl, type: v as CmsInternationalItem["type"] })}>
-              <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="news">交流动态</SelectItem><SelectItem value="conference">国际会议</SelectItem><SelectItem value="report">重要报告</SelectItem><SelectItem value="partner">合作机构</SelectItem></SelectContent>
+              <SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="news">交流动态</SelectItem><SelectItem value="conference">国际会议</SelectItem><SelectItem value="report">国际会议组织</SelectItem><SelectItem value="partner">国际会议合作机构</SelectItem></SelectContent>
             </Select>
             <RichTextEditor value={editIntl.content} onChange={c => setEditIntl({ ...editIntl, content: c })} />
             <Input value={editIntl.linkUrl} onChange={e => setEditIntl({ ...editIntl, linkUrl: e.target.value })} placeholder="外链" />
@@ -1544,14 +2114,19 @@ export default function ContentManagement() {
 
       {/* Download dialog */}
       <Dialog open={!!editDownload} onOpenChange={o => !o && setEditDownload(null)}>
-        <DialogContent>{editDownload && (<><DialogHeader><DialogTitle>下载文件</DialogTitle></DialogHeader>
+        <DialogContent>{editDownload && (<><DialogHeader><DialogTitle>党建下载文件</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <Input value={editDownload.title} onChange={e => setEditDownload({ ...editDownload, title: e.target.value })} placeholder="显示标题" />
+            <Select value={editDownload.category} onValueChange={v => setEditDownload({ ...editDownload, category: v })}>
+              <SelectTrigger><SelectValue placeholder="分类" /></SelectTrigger>
+              <SelectContent>
+                {DOWNLOAD_CATEGORIES_PARTY.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <Input value={editDownload.fileName} onChange={e => setEditDownload({ ...editDownload, fileName: e.target.value })} placeholder="文件名" />
             <Input value={editDownload.fileUrl} onChange={e => setEditDownload({ ...editDownload, fileUrl: e.target.value })} placeholder="文件 URL" />
-            <label className="flex items-center gap-2 text-sm"><Checkbox checked={editDownload.memberOnly} onCheckedChange={v => setEditDownload({ ...editDownload, memberOnly: !!v })} />仅有效会员可下载</label>
           </div>
-          <DialogFooter><Button onClick={() => { persist({ ...db, downloadFiles: db.downloadFiles.some(d => d.id === editDownload.id) ? db.downloadFiles.map(d => d.id === editDownload.id ? editDownload : d) : [...db.downloadFiles, editDownload] }); setEditDownload(null); toast.success("已保存"); }}>保存</Button></DialogFooter></>)}
+          <DialogFooter><Button onClick={() => { const item = { ...editDownload, scope: "party" as const, branchId: null }; persist({ ...db, downloadFiles: db.downloadFiles.some(d => d.id === item.id) ? db.downloadFiles.map(d => d.id === item.id ? item : d) : [...db.downloadFiles, item] }); setEditDownload(null); toast.success("已保存"); }}>保存</Button></DialogFooter></>)}
         </DialogContent>
       </Dialog>
 

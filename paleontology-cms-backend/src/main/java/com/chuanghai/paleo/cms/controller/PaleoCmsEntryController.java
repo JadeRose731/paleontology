@@ -208,9 +208,11 @@ public class PaleoCmsEntryController extends BaseController {
         boolean ok = cmsEntryService.updateById(entry);
         if (ok && !status.equals(beforeStatus)) {
             String action = "PUBLISHED".equals(status) ? AuditAction.CMS_PUBLISH : AuditAction.CMS_UNPUBLISH;
+            Map<String, Object> detail = auditLogService.cmsContentDetailSnapshot(entry.getTitle(), beforeStatus, status);
             auditLogService.log(user, action, "cms", String.valueOf(entryId), entry.getAssociationId(),
-                    String.format("CMS 内容状态变更：%s → %s（%s）", beforeStatus, status, entry.getTitle()),
-                    auditLogService.detailSnapshot(beforeStatus, status, null));
+                    String.format("CMS 内容状态变更：%s → %s（%s）",
+                            detail.get("statusBefore"), detail.get("statusAfter"), entry.getTitle()),
+                    detail);
         }
         return toAjax(ok);
     }

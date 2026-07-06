@@ -43,6 +43,9 @@ public class PaleoMembershipDirectoryService {
     @Autowired
     private AdminScopeService adminScopeService;
 
+    @Autowired
+    private PaleoMembershipStatusService membershipStatusService;
+
     public List<Map<String, Object>> listDirectory() {
         return listDirectoryForAdmin(null);
     }
@@ -140,7 +143,7 @@ public class PaleoMembershipDirectoryService {
             row.put("userType", userRow.getUserType());
             row.put("memberStatus", profile != null ? profile.getMemberStatus() : "NON_MEMBER");
             row.put("memberCategory", profile != null ? profile.getMemberCategory() : null);
-            row.put("membershipStatus", resolveMembershipStatus(profile, latestPayment, pendingJoin));
+            row.put("membershipStatus", membershipStatusService.resolveMembershipStatus(profile, latestPayment, pendingJoin));
             if (profile != null && profile.getValidEndDate() != null) {
                 row.put("validEndDate", dateFormat.format(profile.getValidEndDate()));
             }
@@ -149,56 +152,5 @@ public class PaleoMembershipDirectoryService {
             rows.add(row);
         }
         return rows;
-    }
-
-    private String resolveMembershipStatus(PaleoMemberProfile profile,
-                                           PaleoMembershipPayment latestPayment,
-                                           PaleoMembershipApplication pendingJoin) {
-        if (pendingJoin != null) {
-            return "application_submitted";
-        }
-        if (profile != null && profile.getMemberStatus() != null) {
-            switch (profile.getMemberStatus()) {
-                case "WITHDRAWN":
-                    return "withdrawn";
-                case "PENDING":
-                    return "application_approved";
-                case "EXPIRED":
-                    return "expired";
-                default:
-                    break;
-            }
-        }
-        if (latestPayment != null && latestPayment.getPaymentStatus() != null) {
-            switch (latestPayment.getPaymentStatus()) {
-                case "VOUCHER_REVIEW":
-                    return "voucher_submitted";
-                case "VOUCHER_REJECTED":
-                    return "voucher_rejected";
-                case "INVOICE_PENDING":
-                    return "invoice_pending";
-                case "INVOICE_REVIEW":
-                    return "invoice_submitted";
-                case "INVOICE_REJECTED":
-                    return "invoice_rejected";
-                case "CONFIRMED":
-                    if (profile != null && "ACTIVE".equals(profile.getMemberStatus())) {
-                        return "active";
-                    }
-                    break;
-                default:
-                    break;
-            }
-        }
-        if (profile != null && profile.getMemberStatus() != null) {
-            switch (profile.getMemberStatus()) {
-                case "ACTIVE":
-                    return "active";
-                case "NON_MEMBER":
-                default:
-                    return "not_member";
-            }
-        }
-        return "not_member";
     }
 }

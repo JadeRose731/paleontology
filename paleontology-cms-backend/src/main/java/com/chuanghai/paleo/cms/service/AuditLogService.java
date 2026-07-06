@@ -6,9 +6,16 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.chuanghai.paleo.cms.common.AuditAction;
 import com.chuanghai.paleo.cms.domain.CmsAdminUser;
 import com.chuanghai.paleo.cms.domain.PaleoAuditLog;
+import com.chuanghai.paleo.cms.domain.PaleoConference;
+import com.chuanghai.paleo.cms.domain.PaleoConferenceRegistration;
+import com.chuanghai.paleo.cms.domain.PaleoMembershipApplication;
+import com.chuanghai.paleo.cms.domain.PaleoUser;
 import com.chuanghai.paleo.cms.domain.PaleoUserBinding;
 import com.chuanghai.paleo.cms.mapper.CmsAdminUserMapper;
+import com.chuanghai.paleo.cms.mapper.PaleoConferenceMapper;
+import com.chuanghai.paleo.cms.mapper.PaleoConferenceRegistrationMapper;
 import com.chuanghai.paleo.cms.mapper.PaleoUserBindingMapper;
+import com.chuanghai.paleo.cms.mapper.PaleoUserMapper;
 import com.chuanghai.paleo.cms.mapper.PaleoAuditLogMapper;
 import com.chuanghai.paleo.cms.security.AdminAccessDeniedException;
 import com.chuanghai.paleo.cms.security.LoginUser;
@@ -21,6 +28,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import javax.servlet.http.HttpServletRequest;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 @Service
@@ -31,6 +39,15 @@ public class AuditLogService extends ServiceImpl<PaleoAuditLogMapper, PaleoAudit
 
     @Autowired
     private PaleoUserBindingMapper userBindingMapper;
+
+    @Autowired
+    private PaleoUserMapper userMapper;
+
+    @Autowired
+    private PaleoConferenceRegistrationMapper registrationMapper;
+
+    @Autowired
+    private PaleoConferenceMapper conferenceMapper;
 
     @Autowired
     private AdminScopeService adminScopeService;
@@ -149,13 +166,45 @@ public class AuditLogService extends ServiceImpl<PaleoAuditLogMapper, PaleoAudit
         }
     }
 
-    public Map<String, Object> detailSnapshot(String beforeStatus, String afterStatus, String comment) {
-        java.util.Map<String, Object> snap = new java.util.LinkedHashMap<>();
-        snap.put("beforeStatus", beforeStatus);
-        snap.put("afterStatus", afterStatus);
-        if (StringUtils.hasText(comment)) {
-            snap.put("comment", comment);
+    public Map<String, Object> customerDetailSnapshot(PaleoUser user, String applicationType,
+                                                      String memberCategory, String conferenceTitle,
+                                                      String beforeStatus, String afterStatus, String comment) {
+        Map<String, Object> snap = new LinkedHashMap<>();
+        if (user != null) {
+            if (StringUtils.hasText(user.getUserName())) {
+                snap.put("userName", user.getUserName());
+            }
+            if (StringUtils.hasText(user.getEmail())) {
+                snap.put("userEmail", user.getEmail());
+            }
+            if (StringUtils.hasText(user.getUnit())) {
+                snap.put("userUnit", user.getUnit());
+            }
         }
+        if (StringUtils.hasText(applicationType)) {
+            snap.put("applicationType", applicationTypeLabel(applicationType));
+        }
+        if (StringUtils.hasText(memberCategory)) {
+            snap.put("memberCategory", memberCategoryLabel(memberCategory));
+        }
+        if (StringUtils.hasText(conferenceTitle)) {
+            snap.put("conferenceTitle", conferenceTitle);
+        }
+        snap.put("statusBefore", statusLabel(beforeStatus));
+        snap.put("statusAfter", statusLabel(afterStatus));
+        if (StringUtils.hasText(comment)) {
+            snap.put("reviewComment", comment);
+        }
+        return snap;
+    }
+
+    public Map<String, Object> cmsContentDetailSnapshot(String contentTitle, String beforeStatus, String afterStatus) {
+        Map<String, Object> snap = new LinkedHashMap<>();
+        if (StringUtils.hasText(contentTitle)) {
+            snap.put("contentTitle", contentTitle);
+        }
+        snap.put("statusBefore", cmsStatusLabel(beforeStatus));
+        snap.put("statusAfter", cmsStatusLabel(afterStatus));
         return snap;
     }
 
@@ -165,10 +214,11 @@ public class AuditLogService extends ServiceImpl<PaleoAuditLogMapper, PaleoAudit
         if (action == null) {
             return;
         }
+        PaleoUser user = userId != null ? userMapper.selectById(userId) : null;
         Long associationId = resolvePrimaryAssociationId(userId);
         log(operator, action, "membership", String.valueOf(paymentId), associationId,
-                String.format("会员费审核：%s → %s（paymentId=%d）", beforeStatus, afterStatus, paymentId),
-                detailSnapshot(beforeStatus, afterStatus, comment));
+                String.format("会员费审核：%s → %s", statusLabel(beforeStatus), statusLabel(afterStatus)),
+                customerDetailSnapshot(user, null, null, null, beforeStatus, afterStatus, comment));
     }
 
     public void logConferenceRegistrationReview(LoginUser operator, Long registrationId, Long associationId,
@@ -177,21 +227,109 @@ public class AuditLogService extends ServiceImpl<PaleoAuditLogMapper, PaleoAudit
         if (action == null) {
             return;
         }
+        PaleoConferenceRegistration registration = registrationMapper.selectById(registrationId);
+        PaleoUser user = registration != null && registration.getUserId() != null
+                ? userMapper.selectById(registration.getUserId()) : null;
+        String conferenceTitle = null;
+        if (registration != null && registration.getConferenceId() != null) {
+            PaleoConference conference = conferenceMapper.selectById(registration.getConferenceId());
+            if (conference != null) {
+                conferenceTitle = conference.getConferenceTitle();
+            }
+        }
         log(operator, action, "conference", String.valueOf(registrationId), associationId,
-                String.format("会议费审核：%s → %s（registrationId=%d）", beforeStatus, afterStatus, registrationId),
-                detailSnapshot(beforeStatus, afterStatus, comment));
+                String.format("会议费审核：%s → %s", statusLabel(beforeStatus), statusLabel(afterStatus)),
+                customerDetailSnapshot(user, null, null, conferenceTitle, beforeStatus, afterStatus, comment));
     }
 
-    public void logApplicationReview(LoginUser operator, Long applicationId, String applicationType,
+    public void logApplicationReview(LoginUser operator, PaleoMembershipApplication application,
                                      String beforeStatus, String afterStatus, String comment) {
-        String action = resolveApplicationReviewAction(applicationType, afterStatus);
+        if (application == null) {
+            return;
+        }
+        String action = resolveApplicationReviewAction(application.getApplicationType(), afterStatus);
         if (action == null) {
             return;
         }
-        log(operator, action, "membership", String.valueOf(applicationId), null,
-                String.format("%s申请审核：%s → %s", "WITHDRAW".equals(applicationType) ? "退会" : "入会",
-                        beforeStatus, afterStatus),
-                detailSnapshot(beforeStatus, afterStatus, comment));
+        PaleoUser user = application.getUserId() != null ? userMapper.selectById(application.getUserId()) : null;
+        PaleoUser displayUser = new PaleoUser();
+        displayUser.setUserName(StringUtils.hasText(application.getApplicantName())
+                ? application.getApplicantName()
+                : (user != null ? user.getUserName() : null));
+        displayUser.setEmail(StringUtils.hasText(application.getApplicantEmail())
+                ? application.getApplicantEmail()
+                : (user != null ? user.getEmail() : null));
+        displayUser.setUnit(user != null ? user.getUnit() : null);
+        Map<String, Object> detail = customerDetailSnapshot(
+                displayUser,
+                application.getApplicationType(),
+                application.getMemberCategory(),
+                null,
+                beforeStatus,
+                afterStatus,
+                comment);
+        if (StringUtils.hasText(application.getApplicantPhone())) {
+            detail.put("userPhone", application.getApplicantPhone());
+        }
+        String typeLabel = "WITHDRAW".equals(application.getApplicationType()) ? "退会" : "入会";
+        log(operator, action, "membership", String.valueOf(application.getApplicationId()), null,
+                String.format("%s申请审核：%s → %s", typeLabel, statusLabel(beforeStatus), statusLabel(afterStatus)),
+                detail);
+    }
+
+    private String statusLabel(String status) {
+        if (!StringUtils.hasText(status)) {
+            return "未知";
+        }
+        switch (status) {
+            case "PENDING": return "待审核";
+            case "APPROVED": return "已通过";
+            case "REJECTED": return "已驳回";
+            case "UNPAID": return "未缴费";
+            case "VOUCHER_REVIEW": return "凭证审核中";
+            case "VOUCHER_REJECTED": return "凭证已驳回";
+            case "INVOICE_PENDING": return "待上传发票";
+            case "INVOICE_REVIEW": return "发票审核中";
+            case "INVOICE_REJECTED": return "发票已驳回";
+            case "CONFIRMED": return "已确认";
+            case "VOIDED": return "已作废";
+            case "CANCELLED": return "已取消";
+            default: return status;
+        }
+    }
+
+    private String cmsStatusLabel(String status) {
+        if (!StringUtils.hasText(status)) {
+            return "未知";
+        }
+        switch (status) {
+            case "DRAFT": return "草稿";
+            case "PUBLISHED": return "已发布";
+            case "ARCHIVED": return "已归档";
+            default: return status;
+        }
+    }
+
+    private String applicationTypeLabel(String applicationType) {
+        if ("WITHDRAW".equals(applicationType)) {
+            return "退会申请";
+        }
+        if ("JOIN".equals(applicationType)) {
+            return "入会申请";
+        }
+        return applicationType;
+    }
+
+    private String memberCategoryLabel(String memberCategory) {
+        if (!StringUtils.hasText(memberCategory)) {
+            return null;
+        }
+        switch (memberCategory) {
+            case "standard": return "普通会员";
+            case "student": return "学生会员";
+            case "corporate": return "单位会员";
+            default: return memberCategory;
+        }
     }
 
     private String resolveMembershipReviewAction(String before, String after) {

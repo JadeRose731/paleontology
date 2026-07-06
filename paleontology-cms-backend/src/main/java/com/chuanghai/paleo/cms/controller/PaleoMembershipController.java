@@ -219,8 +219,8 @@ public class PaleoMembershipController extends BaseController {
                 body.get("reviewComment"),
                 getUsername());
         if (ok) {
-            auditLogService.logApplicationReview(currentUser(), applicationId,
-                    application.getApplicationType(), beforeStatus, afterStatus, body.get("reviewComment"));
+            auditLogService.logApplicationReview(currentUser(), application,
+                    beforeStatus, afterStatus, body.get("reviewComment"));
         }
         return toAjax(ok);
     }

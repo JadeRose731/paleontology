@@ -2,21 +2,20 @@ import type { ApiCmsChannel, ApiCmsChannelTreeNode } from "@/lib/cms-api";
 import type { AdminRole, MenuItem } from "@/contexts/AdminContext";
 
 /** 已合并到父级Tab中的section，不再单独显示为菜单项 */
-const MERGED_INTO_PARENT: Set<string> = new Set(["awards"]);
+const MERGED_INTO_PARENT: Set<string> = new Set(["awards", "downloads", "international", "science", "tech-rewards"]);
 
 /** section → 侧边栏子菜单显示名（避免与父菜单重名） */
 const SECTION_DISPLAY_LABELS: Record<string, string> = {
   pages: "学会简介",
   banners: "轮播图",
   news: "新闻动态",
-  personnel: "人员信息",
+  personnel: "组织机构",
   awards: "获奖成果",
   announcements: "会员公告",
   timeline: "学会沿革",
   gallery: "历史相册",
   international: "国际交流",
   services: "学会服务",
-  downloads: "资料下载",
   regulations: "规章条例",
   science: "科学传播",
   "tech-rewards": "科技奖励",
@@ -254,7 +253,7 @@ export const FALLBACK_CMS_MENU: MenuItem[] = [
   { path: "/admin/cms/timeline", label: "学会沿革", icon: "Clock" },
   { path: "/admin/cms/gallery", label: "历史相册", icon: "Images" },
   { path: "/admin/cms/announcements", label: "会员公告", icon: "Megaphone" },
-  { path: "/admin/cms/downloads", label: "资料下载", icon: "Download" },
+  { path: "/admin/cms/public-files", label: "公开文件管理", icon: "FolderUp" },
   { path: "/admin/cms/media", label: "媒体库", icon: "FolderOpen" },
 ];
 
@@ -262,6 +261,6 @@ export const FALLBACK_BRANCH_CMS_MENU: MenuItem[] = [
   { path: "/admin/cms/branch", label: "分会栏目", icon: "Building2" },
   { path: "/admin/cms/announcements", label: "通知公告", icon: "Megaphone" },
   { path: "/admin/cms/gallery", label: "历史相册", icon: "Images" },
-  { path: "/admin/cms/downloads", label: "资料下载", icon: "Download" },
+  { path: "/admin/cms/public-files", label: "公开文件管理", icon: "FolderUp" },
   { path: "/admin/cms/media", label: "媒体库", icon: "FolderOpen" },
 ];

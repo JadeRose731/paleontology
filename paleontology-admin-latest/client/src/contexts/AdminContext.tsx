@@ -585,7 +585,6 @@ const ROUTE_PERMISSIONS: Record<string, AdminRole[]> = {
   "/admin/cms/international": ["super_admin"],
   "/admin/cms/tech-rewards": ["super_admin"],
   "/admin/cms/timeline": ["super_admin"],
-  "/admin/cms/downloads": ["super_admin", "branch_admin"],
   "/admin/cms/regulations": ["super_admin"],
   "/admin/cms/branch": ["branch_admin"],
   "/admin/cms/publish": ["super_admin"],
@@ -598,12 +597,10 @@ const BRANCH_CMS_MENU_ITEMS: MenuItem[] = [
   { path: "/admin/cms/branch", label: "分会栏目", icon: "Building2" },
   { path: "/admin/cms/announcements", label: "通知公告", icon: "Megaphone" },
   { path: "/admin/cms/gallery", label: "历史相册", icon: "Images" },
-  { path: "/admin/cms/science", label: "科学传播", icon: "BookOpen" },
   { path: "/admin/cms/services", label: "学会服务", icon: "Handshake" },
   { path: "/admin/cms/awards", label: "获奖成果", icon: "Award" },
-  { path: "/admin/cms/downloads", label: "资料下载", icon: "Download" },
-  { path: "/admin/cms/media", label: "媒体库", icon: "FolderOpen" },
   { path: "/admin/cms/public-files", label: "公开文件管理", icon: "FolderUp" },
+  { path: "/admin/cms/media", label: "媒体库", icon: "FolderOpen" },
 ];
 
 const ALL_MENU_ITEMS: MenuItem[] = [
@@ -654,8 +651,6 @@ const ALL_MENU_ITEMS: MenuItem[] = [
       { path: "/admin/cms/timeline", label: "学会沿革", icon: "Clock" },
       { path: "/admin/cms/gallery", label: "历史相册", icon: "Images" },
       { path: "/admin/cms/announcements", label: "会员公告", icon: "Megaphone" },
-      { path: "/admin/cms/international", label: "国际交流", icon: "Globe" },
-      { path: "/admin/cms/downloads", label: "资料下载", icon: "Download" },
       { path: "/admin/cms/regulations", label: "规章条例", icon: "BookOpen" },
       { path: "/admin/cms/media", label: "媒体库", icon: "FolderOpen" },
       { path: "/admin/cms/settings", label: "站点配置", icon: "Settings" },

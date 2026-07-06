@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Router, Route, Switch, useLocation } from "wouter";
+import { Router, Route, Switch, useLocation, Redirect } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 
 const USE_HASH = import.meta.env.VITE_HASH_ROUTING === "true";
@@ -13,9 +13,11 @@ import CmsDynamicPage from "./components/cms/CmsDynamicPage";
 /** 混合 / 定制页 — 保留独立 React 实现，不走通用版式渲染 */
 import Home from "./pages/Home";
 import Reporting from "./pages/Reporting";
-import Branches from "./pages/Branches";
+import Branches, { BranchesLegacyRedirect } from "./pages/Branches";
 import SocietyHome from "./pages/SocietyHome";
 import Intro from "./pages/Intro";
+import Structure from "./pages/Structure";
+import BranchSite from "./pages/BranchSite";
 import SocietyAnnouncements from "./pages/SocietyAnnouncements";
 import PersonalCenter from "./pages/PersonalCenter";
 
@@ -29,11 +31,19 @@ function AppRouter() {
     <Switch>
       <Route path="/" component={SocietyHome} />
       <Route path="/intro" component={Intro} />
+      <Route path="/structure" component={Structure} />
+      <Route path="/structure/branch/:branchId/:section?" component={BranchSite} />
       <Route path="/branches" component={Branches} />
+      <Route path="/branches/:branchId">
+        {(params) => <BranchesLegacyRedirect branchId={params.branchId} />}
+      </Route>
       <Route path="/personal-center" component={PersonalCenter} />
       <Route path="/party" component={Home} />
       <Route path="/reporting" component={Reporting} />
       <Route path="/society-announcements" component={SocietyAnnouncements} />
+      <Route path="/downloads-center">
+        <Redirect to="/public-downloads" />
+      </Route>
 
       <Route path="/404" component={NotFound} />
 

@@ -28,8 +28,8 @@ const FALLBACK_MAIN_NAV = [
   { title: "会员公告", path: "/society-announcements" },
   { title: "新闻发布", path: "/news-publish" },
   { title: "国际交流", path: "/international" },
-  { title: "资料下载", path: "/downloads-center" },
   { title: "规章条例", path: "/regulations" },
+  { title: "公开文件", path: "/public-downloads" },
 ];
 
 const FALLBACK_PARTY_NAV = [

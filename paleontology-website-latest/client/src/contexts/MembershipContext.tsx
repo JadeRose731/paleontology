@@ -41,6 +41,10 @@ import {
   getUserToken,
   loginUser,
   mapApiPaymentStatus,
+  pickLatestMembershipPayment,
+  pickAuthoritativeJoinApplication,
+  normalizeReviewStatus,
+  resolveMembershipStatusFromApi,
   mapApiRegistrationToConferenceReg,
   mapApiUserToLocal,
   registerUser,
@@ -51,6 +55,17 @@ import {
   uploadMembershipPaymentFile,
   type ApiMemberProfile,
 } from "@/lib/membership-api";
+
+/** 是否已完成会员路径选择（非 regular 身份即视为已选择） */
+function resolveMembershipChoiceMade(
+  userType: UserType,
+  membershipChoiceMade?: string | boolean | null,
+): boolean {
+  if (userType === USER_TYPE.MEMBER || userType === USER_TYPE.NON_MEMBER) {
+    return true;
+  }
+  return membershipChoiceMade === "1" || membershipChoiceMade === true;
+}
 
 /** 智能审核：工作日加算（与管理端一致） */
 function addWorkdays(dateStr: string, workdays: number): string {
@@ -416,14 +431,13 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
   }, []);
 
-  // Load from localStorage on mount
+  // Load from localStorage on mount（有 API token 时会员/会议状态由后端同步，不读缓存）
   useEffect(() => {
     const storedUser = localStorage.getItem("paleo_current_user");
     if (storedUser) {
       const user = JSON.parse(storedUser);
       setCurrentUser(user);
-      // Load user-specific states
-      loadUserState(user.email);
+      loadUserState(user.email, { skipBusinessState: !!getUserToken() });
     }
 
     const storedAllUsers = localStorage.getItem("paleo_all_users");
@@ -436,7 +450,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // 从后端同步会员费/会议报名状态
   useEffect(() => {
-    if (!currentUser || !getUserToken()) return;
+    if (!currentUser?.email || !getUserToken()) return;
     const syncFromApi = async () => {
       try {
         await syncBusinessStateFromApi(currentUser.email);
@@ -446,21 +460,32 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
     syncFromApi();
     const timer = window.setInterval(syncFromApi, 5000);
-    return () => window.clearInterval(timer);
+    const onFocus = () => { void syncFromApi(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") void syncFromApi();
+    });
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [currentUser?.email]);
 
-  // 启动时恢复登录态
+  // 启动时恢复登录态并强制从后端拉取最新业务状态
   useEffect(() => {
     const token = getUserToken();
-    if (!token || currentUser) return;
+    if (!token) return;
     fetchAuthInfo()
       .then(({ user, profile }) => {
         const mapped = mapApiUserToLocal(user);
         setCurrentUser(mapped);
         saveState("paleo_current_user", mapped);
-        setUserType((user.userType as UserType) || "regular");
-        setMembershipChoiceMade(user.membershipChoiceMade === "1");
-        loadUserState(user.email);
+        applyUserIdentity(
+          user.email,
+          (user.userType as UserType) || "regular",
+          user.membershipChoiceMade,
+        );
+        loadUserState(user.email, { skipBusinessState: true });
         return syncBusinessStateFromApi(user.email, profile);
       })
       .catch(() => {
@@ -481,15 +506,27 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleMembershipExpiry reads latest state when invoked
   }, [currentUser?.email, userType, societyMembership.status, societyMembership.expiryDate]);
 
-  const loadUserState = (email: string) => {
+  const loadUserState = (email: string, options?: { skipBusinessState?: boolean }) => {
     const membershipKey = `paleo_society_membership_${email}`;
     const branchesKey = `paleo_bound_branches_${email}`;
     const confsKey = `paleo_confs_${email}`;
     const notifsKey = `paleo_notifs_${email}`;
 
-    const storedMembership = localStorage.getItem(membershipKey);
-    setSocietyMembership(storedMembership ? JSON.parse(storedMembership) : DEFAULT_SOCIETY_MEMBERSHIP);
+    if (!options?.skipBusinessState) {
+      const storedMembership = localStorage.getItem(membershipKey);
+      setSocietyMembership(storedMembership ? JSON.parse(storedMembership) : DEFAULT_SOCIETY_MEMBERSHIP);
 
+      const storedConfs = localStorage.getItem(confsKey);
+      setConferenceRegs(storedConfs ? JSON.parse(storedConfs) : {});
+
+      const appKey = `paleo_membership_application_${email}`;
+      const storedApp = localStorage.getItem(appKey);
+      setMembershipApplication(storedApp ? JSON.parse(storedApp) : null);
+
+      const wdKey = `paleo_withdrawal_application_${email}`;
+      const storedWd = localStorage.getItem(wdKey);
+      setWithdrawalApplication(storedWd ? JSON.parse(storedWd) : null);
+    }
     const storedBranches = localStorage.getItem(branchesKey);
     const parsedBranches: string[] = storedBranches ? JSON.parse(storedBranches) : [];
     // 有效的新格式分会 id（过滤掉旧的数字 id "1"~"6" 等历史残留数据）
@@ -501,53 +538,73 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       localStorage.setItem(branchesKey, JSON.stringify(cleanBranches));
     }
 
-    const storedConfs = localStorage.getItem(confsKey);
-    setConferenceRegs(storedConfs ? JSON.parse(storedConfs) : {});
-
     const storedNotifs = localStorage.getItem(notifsKey);
     setNotifications(storedNotifs ? JSON.parse(storedNotifs) : DEFAULT_NOTIFICATIONS);
 
-    const typeKey = `paleo_user_type_${email}`;
-    const storedType = localStorage.getItem(typeKey);
-    setUserType((storedType as UserType) || "regular");
+    if (!options?.skipBusinessState) {
+      const typeKey = `paleo_user_type_${email}`;
+      const storedType = (localStorage.getItem(typeKey) as UserType) || "regular";
+      const choiceMade = resolveMembershipChoiceMade(
+        storedType,
+        localStorage.getItem(`paleo_choice_made_${email}`) === "true",
+      );
+      setUserType(storedType);
+      setMembershipChoiceMade(choiceMade);
+    }
+  };
 
-    const choiceKey = `paleo_choice_made_${email}`;
-    setMembershipChoiceMade(localStorage.getItem(choiceKey) === "true");
-
-    // Phase 6: 加载入会/退会申请书
-    const appKey = `paleo_membership_application_${email}`;
-    const storedApp = localStorage.getItem(appKey);
-    setMembershipApplication(storedApp ? JSON.parse(storedApp) : null);
-
-    const wdKey = `paleo_withdrawal_application_${email}`;
-    const storedWd = localStorage.getItem(wdKey);
-    setWithdrawalApplication(storedWd ? JSON.parse(storedWd) : null);
+  const applyUserIdentity = (
+    email: string,
+    nextUserType: UserType,
+    membershipChoiceMadeRaw?: string | boolean | null,
+  ) => {
+    const choiceMade = resolveMembershipChoiceMade(nextUserType, membershipChoiceMadeRaw);
+    setUserType(nextUserType);
+    setMembershipChoiceMade(choiceMade);
+    localStorage.setItem(`paleo_user_type_${email}`, nextUserType);
+    localStorage.setItem(`paleo_choice_made_${email}`, choiceMade ? "true" : "false");
   };
 
   const syncBusinessStateFromApi = async (email: string, profile?: ApiMemberProfile) => {
     let resolvedProfile = profile;
-    if (!resolvedProfile && getUserToken()) {
+    let serverMembershipStatus: string | undefined;
+    if (getUserToken()) {
       try {
         const info = await fetchAuthInfo();
-        resolvedProfile = info.profile;
+        resolvedProfile = resolvedProfile ?? info.profile;
+        serverMembershipStatus = info.membershipStatus;
       } catch {
-        // 忽略 profile 拉取失败，继续使用其它数据源
+        // 忽略，继续使用其它数据源
       }
     }
 
-    const [payments, registrations, joinApps, withdrawApps, branchBindings] = await Promise.all([
+    const [
+      paymentsResult,
+      registrationsResult,
+      joinAppsResult,
+      withdrawAppsResult,
+      branchBindingsResult,
+    ] = await Promise.allSettled([
       fetchMyMembershipPayments(),
       fetchMyConferenceRegistrations(),
       fetchMyMembershipApplications("JOIN"),
       fetchMyMembershipApplications("WITHDRAW"),
-      getUserToken() ? fetchMyBranchBindings().catch(() => [] as string[]) : Promise.resolve([] as string[]),
+      getUserToken() ? fetchMyBranchBindings() : Promise.resolve([] as string[]),
     ]);
 
-    const latestPayment = payments.find((p) => (p.paymentStatus || "").toUpperCase() !== "VOIDED");
+    const payments = paymentsResult.status === "fulfilled" ? paymentsResult.value : [];
+    const registrations = registrationsResult.status === "fulfilled" ? registrationsResult.value : [];
+    const joinApps = joinAppsResult.status === "fulfilled" ? joinAppsResult.value : [];
+    const withdrawApps = withdrawAppsResult.status === "fulfilled" ? withdrawAppsResult.value : [];
+    const branchBindings = branchBindingsResult.status === "fulfilled" ? branchBindingsResult.value : [];
+
+    const latestPayment = pickLatestMembershipPayment(payments);
     const paymentStatus = latestPayment ? mapApiPaymentStatus(latestPayment.paymentStatus) : undefined;
-    const pendingJoin = joinApps.find((app) => app.reviewStatus === "PENDING");
-    const latestJoin = pendingJoin ?? joinApps.find((app) => app.reviewStatus === "APPROVED") ?? joinApps[0];
-    const pendingWithdraw = withdrawApps.find((app) => app.reviewStatus === "PENDING");
+    const authoritativeJoin = pickAuthoritativeJoinApplication(joinApps);
+    const joinReviewStatus = authoritativeJoin
+      ? normalizeReviewStatus(authoritativeJoin.reviewStatus)
+      : "";
+    const pendingWithdraw = withdrawApps.find((app) => normalizeReviewStatus(app.reviewStatus) === "PENDING");
     const latestWithdraw = pendingWithdraw ?? withdrawApps[0];
     let membership: SocietyMembership = { ...DEFAULT_SOCIETY_MEMBERSHIP };
     let nextMembershipApp: MembershipApplication | null = null;
@@ -558,8 +615,8 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const profileIsActive = resolvedProfile?.memberStatus === "ACTIVE";
 
-    if (pendingJoin) {
-      const appStatus = mapApiApplicationReviewStatus(pendingJoin.reviewStatus, "JOIN");
+    if (authoritativeJoin && joinReviewStatus === "PENDING") {
+      const appStatus = mapApiApplicationReviewStatus(authoritativeJoin.reviewStatus, "JOIN");
       membership = {
         ...membership,
         status: appStatus as SocietyMembership["status"],
@@ -567,13 +624,13 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         history: membership.history,
       };
       nextMembershipApp = {
-        applicationId: pendingJoin.applicationId,
+        applicationId: authoritativeJoin.applicationId,
         status: appStatus,
-        applicationFileUrl: pendingJoin.applicationFileUrl || "",
+        applicationFileUrl: authoritativeJoin.applicationFileUrl || "",
         applicationFileName: "入会申请书",
-        submitTime: pendingJoin.createTime || "",
-        reviewTime: pendingJoin.reviewTime,
-        rejectReason: pendingJoin.reviewComment,
+        submitTime: authoritativeJoin.createTime || "",
+        reviewTime: authoritativeJoin.reviewTime,
+        rejectReason: authoritativeJoin.reviewComment,
       };
     } else if (pendingWithdraw) {
       const wdStatus = mapApiApplicationReviewStatus(pendingWithdraw.reviewStatus, "WITHDRAW");
@@ -592,6 +649,9 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         rejectReason: pendingWithdraw.reviewComment,
       };
     } else if (paymentInProgress) {
+      const voucherApprovedAt = latestPayment.updateTime?.split("T")[0]
+        || latestPayment.updateTime?.split(" ")[0]
+        || new Date().toISOString().split("T")[0];
       const record: PaymentRecord = {
         id: `rec-s-${latestPayment.paymentId}`,
         type: "society_fee",
@@ -607,6 +667,9 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         ...membership,
         status: paymentStatus as SocietyMembership["status"],
         currentPaymentId: latestPayment.paymentId,
+        invoiceDeadline: paymentStatus === "invoice_pending"
+          ? addWorkdays(voucherApprovedAt, 7)
+          : membership.invoiceDeadline,
         voucherRejectReason: paymentStatus === "voucher_rejected" ? latestPayment.reviewComment : undefined,
         invoiceRejectReason: paymentStatus === "invoice_rejected" ? latestPayment.reviewComment : undefined,
         expiryDate: undefined,
@@ -632,37 +695,37 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         expiryDate: resolvedProfile?.validEndDate || undefined,
         history: record ? [record] : membership.history,
       };
-    } else if (latestJoin?.reviewStatus === "APPROVED") {
+    } else if (authoritativeJoin && joinReviewStatus === "APPROVED") {
       membership = {
         ...membership,
         status: "application_approved",
         history: membership.history,
       };
       nextMembershipApp = {
-        applicationId: latestJoin.applicationId,
+        applicationId: authoritativeJoin.applicationId,
         status: "application_approved",
-        applicationFileUrl: latestJoin.applicationFileUrl || "",
+        applicationFileUrl: authoritativeJoin.applicationFileUrl || "",
         applicationFileName: "入会申请书",
-        submitTime: latestJoin.createTime || "",
-        reviewTime: latestJoin.reviewTime,
-        rejectReason: latestJoin.reviewComment,
+        submitTime: authoritativeJoin.createTime || "",
+        reviewTime: authoritativeJoin.reviewTime,
+        rejectReason: authoritativeJoin.reviewComment,
       };
-    } else if (latestJoin && latestJoin.reviewStatus === "REJECTED") {
-      const appStatus = mapApiApplicationReviewStatus(latestJoin.reviewStatus, "JOIN");
+    } else if (authoritativeJoin && joinReviewStatus === "REJECTED") {
+      const appStatus = mapApiApplicationReviewStatus(authoritativeJoin.reviewStatus, "JOIN");
       membership = {
         ...membership,
         status: appStatus as SocietyMembership["status"],
-        applicationRejectReason: latestJoin.reviewComment,
+        applicationRejectReason: authoritativeJoin.reviewComment,
         history: membership.history,
       };
       nextMembershipApp = {
-        applicationId: latestJoin.applicationId,
+        applicationId: authoritativeJoin.applicationId,
         status: appStatus,
-        applicationFileUrl: latestJoin.applicationFileUrl || "",
+        applicationFileUrl: authoritativeJoin.applicationFileUrl || "",
         applicationFileName: "入会申请书",
-        submitTime: latestJoin.createTime || "",
-        reviewTime: latestJoin.reviewTime,
-        rejectReason: latestJoin.reviewComment,
+        submitTime: authoritativeJoin.createTime || "",
+        reviewTime: authoritativeJoin.reviewTime,
+        rejectReason: authoritativeJoin.reviewComment,
       };
     } else if (resolvedProfile?.memberStatus === "PENDING") {
       membership = { ...membership, status: "application_approved", history: membership.history };
@@ -675,6 +738,75 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     } else if (resolvedProfile?.memberStatus === "WITHDRAWN" && withdrawalStillAuthoritative(joinApps, latestWithdraw)) {
       membership = { ...membership, status: "withdrawn", history: membership.history };
+    }
+
+    const resolvedStatus = resolveMembershipStatusFromApi({
+      membershipStatus: serverMembershipStatus,
+      profile: resolvedProfile,
+      joinApps,
+      withdrawApps,
+      payments,
+    });
+
+    if (resolvedStatus !== membership.status) {
+      membership = {
+        ...membership,
+        status: resolvedStatus as SocietyMembership["status"],
+        history: membership.history,
+      };
+    }
+
+    if (resolvedStatus === "application_approved" && authoritativeJoin && !nextMembershipApp) {
+      nextMembershipApp = {
+        applicationId: authoritativeJoin.applicationId,
+        status: "application_approved",
+        applicationFileUrl: authoritativeJoin.applicationFileUrl || "",
+        applicationFileName: "入会申请书",
+        submitTime: authoritativeJoin.createTime || "",
+        reviewTime: authoritativeJoin.reviewTime,
+        rejectReason: authoritativeJoin.reviewComment,
+      };
+    }
+
+    if (
+      latestPayment
+      && paymentStatus
+      && paymentStatus !== "unpaid"
+      && ["voucher_submitted", "voucher_rejected", "invoice_pending", "invoice_submitted", "invoice_rejected"].includes(resolvedStatus)
+      && membership.currentPaymentId !== latestPayment.paymentId
+    ) {
+      const voucherApprovedAt = latestPayment.updateTime?.split("T")[0]
+        || latestPayment.updateTime?.split(" ")[0]
+        || new Date().toISOString().split("T")[0];
+      const record: PaymentRecord = {
+        id: `rec-s-${latestPayment.paymentId}`,
+        type: "society_fee",
+        targetName: "中国古生物学会会员费",
+        amount: Number(latestPayment.amount || 0),
+        voucherUrl: latestPayment.voucherUrl || "",
+        invoiceUrl: latestPayment.invoiceUrl || "",
+        submitTime: latestPayment.createTime || new Date().toLocaleString("zh-CN"),
+        status: paymentStatus as PaymentRecord["status"],
+        rejectReason: latestPayment.reviewComment,
+      };
+      membership = {
+        ...membership,
+        currentPaymentId: latestPayment.paymentId,
+        invoiceDeadline: paymentStatus === "invoice_pending"
+          ? addWorkdays(voucherApprovedAt, 7)
+          : membership.invoiceDeadline,
+        voucherRejectReason: paymentStatus === "voucher_rejected" ? latestPayment.reviewComment : undefined,
+        invoiceRejectReason: paymentStatus === "invoice_rejected" ? latestPayment.reviewComment : undefined,
+        history: membership.history.length ? membership.history : [record],
+      };
+    }
+
+    if (resolvedStatus === "active" && resolvedProfile?.validEndDate) {
+      membership = {
+        ...membership,
+        expiryDate: resolvedProfile.validEndDate,
+        currentPaymentId: latestPayment?.paymentId ?? membership.currentPaymentId,
+      };
     }
 
     if (latestWithdraw && !pendingWithdraw) {
@@ -755,13 +887,17 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
         setUserType(apiUserType);
         localStorage.setItem(`paleo_user_type_${email}`, apiUserType);
-        const choiceMade = membership.status === "active" || authInfo.user.membershipChoiceMade === "1";
+        const choiceMade = resolveMembershipChoiceMade(apiUserType, authInfo.user.membershipChoiceMade);
         setMembershipChoiceMade(choiceMade);
         localStorage.setItem(`paleo_choice_made_${email}`, choiceMade ? "true" : "false");
+        if (choiceMade && authInfo.user.membershipChoiceMade !== "1") {
+          void updateUserTypeApi(apiUserType, true).catch(() => {});
+        }
       } catch {
-        if (membership.status === "active") {
-          setUserType("member");
-          localStorage.setItem(`paleo_user_type_${email}`, "member");
+        if (membership.status === "active" || membership.status === "application_approved") {
+          const repairType = membership.status === "active" ? "member" : "member";
+          setUserType(repairType);
+          localStorage.setItem(`paleo_user_type_${email}`, repairType);
           setMembershipChoiceMade(true);
           localStorage.setItem(`paleo_choice_made_${email}`, "true");
         }
@@ -835,7 +971,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const mapped = mapApiUserToLocal(data.user);
         setCurrentUser(mapped);
         saveState("paleo_current_user", mapped);
-        loadUserState(user.email);
+        loadUserState(user.email, { skipBusinessState: true });
         await syncBusinessStateFromApi(user.email, data.profile);
         toast.success("账号注册成功！请登录后前往【学会服务 → 会员服务】完成会员路径选择。");
       } catch (e) {
@@ -852,9 +988,12 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const mapped = mapApiUserToLocal(data.user);
         setCurrentUser(mapped);
         saveState("paleo_current_user", mapped);
-        setUserType((data.user.userType as UserType) || "regular");
-        setMembershipChoiceMade(data.user.membershipChoiceMade === "1");
-        loadUserState(email);
+        applyUserIdentity(
+          email,
+          (data.user.userType as UserType) || "regular",
+          data.user.membershipChoiceMade,
+        );
+        loadUserState(email, { skipBusinessState: true });
         await syncBusinessStateFromApi(email, data.profile);
         toast.success(`欢迎回来，${mapped.name}！`);
       } catch (e) {
@@ -1506,7 +1645,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     try {
       const existing = await fetchMyMembershipApplications("JOIN");
-      if (existing.some((app) => app.reviewStatus === "PENDING")) {
+      if (existing.some((app) => normalizeReviewStatus(app.reviewStatus) === "PENDING")) {
         await syncBusinessStateFromApi(currentUser.email);
         toast.info("您已有待审核的入会申请，请等待管理员审核。");
         return true;
@@ -1596,7 +1735,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     try {
       const existing = await fetchMyMembershipApplications("WITHDRAW");
-      if (existing.some((app) => app.reviewStatus === "PENDING")) {
+      if (existing.some((app) => normalizeReviewStatus(app.reviewStatus) === "PENDING")) {
         await syncBusinessStateFromApi(currentUser.email);
         toast.error("您已有待审核的退会申请，请勿重复提交。");
         return false;
@@ -1679,12 +1818,7 @@ export const MembershipProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // 离线时仍允许本地路径选择
       }
 
-      setUserType(path);
-      setMembershipChoiceMade(true);
-
-      const email = currentUser.email;
-      localStorage.setItem(`paleo_user_type_${email}`, path);
-      localStorage.setItem(`paleo_choice_made_${email}`, "true");
+      applyUserIdentity(currentUser.email, path, true);
 
       if (path === "member") {
         addNotification({

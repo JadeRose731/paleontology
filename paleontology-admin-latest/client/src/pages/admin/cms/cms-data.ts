@@ -96,7 +96,10 @@ export const CMS_PUBLIC_FILE_FORMAT_HINTS: Record<CmsPublicFileCategory, { forma
 export interface CmsPublicFile {
   id: string;
   title: string;
+  /** 媒体类型：文档/音频/影视/照片 */
   category: CmsPublicFileCategory;
+  /** 资料主题分类（原资料下载分类，如管理办法、学术与年报） */
+  subjectCategory?: string;
   fileName: string;
   fileUrl: string;
   fileSize: string;
@@ -104,6 +107,8 @@ export interface CmsPublicFile {
   downloadCount: number;
   uploadDate: string;
   deleted: boolean;
+  memberOnly?: boolean;
+  branchId?: string | null;
 }
 
 /** 文件分类对应的格式扩展名白名单（用于前端提示） */
@@ -148,6 +153,7 @@ export interface CmsArticle {
 
 export interface CmsPage {
   id: string;
+  cmsEntryId?: number;
   code: string;
   title: string;
   content: string;
@@ -336,8 +342,9 @@ export const PARTY_COLUMNS = [
 ] as const;
 
 export const GALLERY_CATEGORIES = ["早期风采", "学术会议", "野外考查", "国际交流"];
-export const SCIENCE_CATEGORIES = ["科普文章", "科普视频", "科普基地", "学术专著", "化石保护"];
-export const DOWNLOAD_CATEGORIES_SOCIETY = ["管理办法", "学术标准", "年报资料", "会员表格"];
+export const SCIENCE_CATEGORIES = ["学术专著", "科普读物", "科普文章", "科普视频", "科普基地", "化石保护"];
+export const DOWNLOAD_CATEGORIES_SOCIETY = ["管理办法", "学术标准", "年报资料", "会员表格", "学术与年报", "会员申请与管理资料", "学会管理办法"];
+export const DOWNLOAD_CATEGORIES_BRANCH = ["会议简讯", "会议论文摘要集", "入会申请表", "其他"];
 export const DOWNLOAD_CATEGORIES_PARTY = ["入党申请书", "思想汇报", "转正申请", "其他模板"];
 
 export const DEFAULT_CMS: CmsDatabase = {
@@ -367,7 +374,7 @@ export const DEFAULT_CMS: CmsDatabase = {
       title: "微体学分会学术活动 Banner",
       imageUrl:
         "https://lh3.googleusercontent.com/aida-public/AB6AXuDlNRleNYvnVjS703omdnq4SM-S4HAx1xJVPMOPltrMf3netfsxNQud338lNFjAxAV31Qvw_etAUmU7KMW1YX2RKxA0dIotwdignl1jKI4uZFvvhgyNMpO-uro4Ld7zpIKXe2gunUiSareQKqn3BzF2YiR1c6Mo4uJK52AGT3lz9FhR7rC91LMgbBgK9PpmNDIwMww8mYPVHIhMLQCaKNLMN8lTHz0YLT_5l_2At0BlIvczBqmME2kYLxSAm1wZ1q303vtfCEZnWQ4",
-      linkUrl: "/branches/wtxfh",
+      linkUrl: "/structure/branch/wtxfh/home",
       sort: 1,
       branchId: "wtxfh",
       enabled: true,
@@ -455,6 +462,36 @@ export const DEFAULT_CMS: CmsDatabase = {
       pageType: "richtext",
     },
     {
+      id: "page-intro-planning",
+      code: "intro_planning",
+      title: "发展规划",
+      content: "<p>中国古生物学会中长期发展规划……</p>",
+      status: "published",
+      branchId: null,
+      updatedAt: "2026-06-01",
+      pageType: "richtext",
+    },
+    {
+      id: "page-structure-org",
+      code: "structure_org_chart",
+      title: "组织机构",
+      content: "<p>中国古生物学会组织机构图……</p>",
+      status: "published",
+      branchId: null,
+      updatedAt: "2026-06-01",
+      pageType: "richtext",
+    },
+    {
+      id: "page-structure-mgmt",
+      code: "structure_management",
+      title: "管理系列",
+      content: "<p>学会管理系列说明……</p>",
+      status: "published",
+      branchId: null,
+      updatedAt: "2026-06-01",
+      pageType: "richtext",
+    },
+    {
       id: "page-party-org",
       code: "party_organizations",
       title: "党群机构",
@@ -494,6 +531,26 @@ export const DEFAULT_CMS: CmsDatabase = {
       bio: "中国科学院古脊椎动物与古人类研究所研究员。",
       photoUrl: "",
       sort: 2,
+      branchId: null,
+    },
+    {
+      id: "person-council-1",
+      name: "示例理事",
+      title: "常务理事",
+      group: "理事会",
+      bio: "理事会成员示例。",
+      photoUrl: "",
+      sort: 1,
+      branchId: null,
+    },
+    {
+      id: "person-secretariat-1",
+      name: "秘书处联系人",
+      title: "秘书长",
+      group: "秘书处",
+      bio: "负责学会日常运转与对外联络。",
+      photoUrl: "",
+      sort: 1,
       branchId: null,
     },
   ],
@@ -662,16 +719,6 @@ export const DEFAULT_CMS: CmsDatabase = {
   ],
   downloadFiles: [
     {
-      id: "dl-1",
-      title: "中国古生物学会会员登记表",
-      category: "会员表格",
-      fileName: "membership-form.docx",
-      fileUrl: "/downloads/membership-form.docx",
-      memberOnly: false,
-      branchId: null,
-      scope: "society",
-    },
-    {
       id: "dl-party-1",
       title: "入党申请书模板",
       category: "入党申请书",
@@ -680,16 +727,6 @@ export const DEFAULT_CMS: CmsDatabase = {
       memberOnly: false,
       branchId: null,
       scope: "party",
-    },
-    {
-      id: "dl-wtxfh",
-      title: "微体学分会会议简讯",
-      category: "会议简讯",
-      fileName: "wtxfh-newsletter.pdf",
-      fileUrl: "/downloads/wtxfh-newsletter.pdf",
-      memberOnly: true,
-      branchId: "wtxfh",
-      scope: "branch",
     },
   ],
   timelineNodes: [
@@ -813,6 +850,7 @@ export const DEFAULT_CMS: CmsDatabase = {
       id: "pf-1",
       title: "2026年学会图片大赛参赛规则与投稿说明",
       category: "document",
+      subjectCategory: "学术与年报",
       fileName: "2026图片大赛参赛规则.pdf",
       fileUrl: "/media/photo-contest-2026.pdf",
       fileSize: "256 KB",
@@ -820,11 +858,14 @@ export const DEFAULT_CMS: CmsDatabase = {
       downloadCount: 0,
       uploadDate: "2026-06-18",
       deleted: false,
+      memberOnly: false,
+      branchId: null,
     },
     {
       id: "pf-2",
       title: "科普讲解大赛选手报名表（Word版）",
       category: "document",
+      subjectCategory: "会员申请与管理资料",
       fileName: "科普讲解大赛报名表.docx",
       fileUrl: "/media/kepu-signup.docx",
       fileSize: "88 KB",
@@ -832,6 +873,38 @@ export const DEFAULT_CMS: CmsDatabase = {
       downloadCount: 0,
       uploadDate: "2026-06-18",
       deleted: false,
+      memberOnly: false,
+      branchId: null,
+    },
+    {
+      id: "pf-dl-1",
+      title: "中国古生物学会会员登记表",
+      category: "document",
+      subjectCategory: "会员表格",
+      fileName: "membership-form.docx",
+      fileUrl: "/downloads/membership-form.docx",
+      fileSize: "142 KB",
+      remark: "",
+      downloadCount: 0,
+      uploadDate: "2023-10-15",
+      deleted: false,
+      memberOnly: false,
+      branchId: null,
+    },
+    {
+      id: "pf-wtxfh",
+      title: "微体学分会会议简讯",
+      category: "document",
+      subjectCategory: "会议简讯",
+      fileName: "wtxfh-newsletter.pdf",
+      fileUrl: "/downloads/wtxfh-newsletter.pdf",
+      fileSize: "320 KB",
+      remark: "",
+      downloadCount: 0,
+      uploadDate: "2026-05-01",
+      deleted: false,
+      memberOnly: true,
+      branchId: "wtxfh",
     },
     {
       id: "pf-3",

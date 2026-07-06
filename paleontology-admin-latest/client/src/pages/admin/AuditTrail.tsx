@@ -14,7 +14,10 @@ import {
   AUDIT_ACTION_LABEL,
   AUDIT_ROLE_LABEL,
   fetchAuditLogs,
+  formatAuditSummary,
+  parseAuditDetail,
   type ApiAuditLogRow,
+  type AuditCustomerDetail,
 } from "@/lib/audit-api";
 
 const ITEMS_PER_PAGE = 15;
@@ -27,6 +30,77 @@ const TARGET_TYPE_OPTIONS = [
   { value: "binding", label: "绑定" },
   { value: "recognition", label: "识别" },
 ];
+
+function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h3 className="text-sm font-semibold text-strata-blue-deep border-b border-fossil-stone pb-1">{title}</h3>
+      <div className="space-y-1.5">{children}</div>
+    </section>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex gap-2">
+      <span className="text-muted-foreground shrink-0">{label}：</span>
+      <span className="break-all">{value}</span>
+    </div>
+  );
+}
+
+function AuditDetailPanel({ row }: { row: ApiAuditLogRow }) {
+  const detail: AuditCustomerDetail | null = parseAuditDetail(row.detailJson);
+  const hasUserInfo = !!(detail?.userName || detail?.userEmail || detail?.userPhone || detail?.userUnit);
+  const hasChangeInfo = !!(detail?.statusBefore || detail?.statusAfter || detail?.reviewComment);
+
+  return (
+    <div className="space-y-5 mt-4 text-sm">
+      <DetailSection title="操作信息">
+        <DetailRow label="操作时间" value={row.createTime} />
+        <DetailRow label="审核人" value={row.operatorEmail} />
+        <DetailRow label="审核角色" value={AUDIT_ROLE_LABEL[row.operatorRole] || row.operatorRole} />
+        <DetailRow label="操作类型" value={AUDIT_ACTION_LABEL[row.action] || row.action} />
+        <DetailRow label="操作摘要" value={formatAuditSummary(row.summary)} />
+      </DetailSection>
+
+      {hasUserInfo && (
+        <DetailSection title="相关用户">
+          <DetailRow label="姓名" value={detail?.userName} />
+          <DetailRow label="邮箱" value={detail?.userEmail} />
+          <DetailRow label="手机" value={detail?.userPhone} />
+          <DetailRow label="单位" value={detail?.userUnit} />
+          <DetailRow label="申请类型" value={detail?.applicationType} />
+          <DetailRow label="会员类别" value={detail?.memberCategory} />
+          <DetailRow label="相关会议" value={detail?.conferenceTitle} />
+        </DetailSection>
+      )}
+
+      {hasChangeInfo && (
+        <DetailSection title="变更说明">
+          {(detail?.statusBefore || detail?.statusAfter) && (
+            <div className="flex gap-2 items-center">
+              <span className="text-muted-foreground shrink-0">处理结果：</span>
+              <span>
+                {detail?.statusBefore || "—"}
+                <span className="mx-1.5 text-muted-foreground">→</span>
+                {detail?.statusAfter || "—"}
+              </span>
+            </div>
+          )}
+          <DetailRow label="审核意见" value={detail?.reviewComment} />
+        </DetailSection>
+      )}
+
+      {!hasUserInfo && !hasChangeInfo && row.detailJson && (
+        <DetailSection title="变更说明">
+          <DetailRow label="处理结果" value={formatAuditSummary(row.summary)} />
+        </DetailSection>
+      )}
+    </div>
+  );
+}
 
 export default function AuditTrail() {
   const [rows, setRows] = useState<ApiAuditLogRow[]>([]);
@@ -75,15 +149,6 @@ export default function AuditTrail() {
     setStartTime("");
     setEndTime("");
     setPage(1);
-  };
-
-  const parseDetail = (json?: string | null) => {
-    if (!json) return null;
-    try {
-      return JSON.parse(json);
-    } catch {
-      return json;
-    }
   };
 
   return (
@@ -190,7 +255,9 @@ export default function AuditTrail() {
                     <TableCell className="text-xs">
                       {AUDIT_ACTION_LABEL[row.action] || row.action}
                     </TableCell>
-                    <TableCell className="text-sm max-w-xs truncate" title={row.summary}>{row.summary}</TableCell>
+                    <TableCell className="text-sm max-w-xs truncate" title={formatAuditSummary(row.summary)}>
+                      {formatAuditSummary(row.summary)}
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button size="sm" variant="ghost" onClick={() => setSelected(row)}>详情</Button>
                     </TableCell>
@@ -219,28 +286,12 @@ export default function AuditTrail() {
       <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>审计详情</SheetTitle>
-            <SheetDescription>日志 ID：{selected?.logId}</SheetDescription>
+            <SheetTitle>操作详情</SheetTitle>
+            <SheetDescription>
+              {selected ? formatAuditSummary(selected.summary) : ""}
+            </SheetDescription>
           </SheetHeader>
-          {selected && (
-            <div className="space-y-4 mt-4 text-sm">
-              <div><span className="text-muted-foreground">时间：</span>{selected.createTime}</div>
-              <div><span className="text-muted-foreground">操作者：</span>{selected.operatorEmail}</div>
-              <div><span className="text-muted-foreground">角色：</span>{AUDIT_ROLE_LABEL[selected.operatorRole] || selected.operatorRole}</div>
-              <div><span className="text-muted-foreground">动作：</span>{AUDIT_ACTION_LABEL[selected.action] || selected.action}</div>
-              <div><span className="text-muted-foreground">目标：</span>{selected.targetType} / {selected.targetId}</div>
-              <div><span className="text-muted-foreground">摘要：</span>{selected.summary}</div>
-              {selected.ip && <div><span className="text-muted-foreground">IP：</span>{selected.ip}</div>}
-              {selected.detailJson && (
-                <div>
-                  <p className="text-muted-foreground mb-1">变更详情：</p>
-                  <pre className="bg-slate-50 border rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap">
-                    {JSON.stringify(parseDetail(selected.detailJson), null, 2)}
-                  </pre>
-                </div>
-              )}
-            </div>
-          )}
+          {selected && <AuditDetailPanel row={selected} />}
         </SheetContent>
       </Sheet>
     </div>

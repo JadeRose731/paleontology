@@ -4,13 +4,11 @@ import { resolveLayoutComponent } from "@/components/cms/layout-registry";
 import NotFound from "@/pages/NotFound";
 import Services from "@/pages/Services";
 import PublicDownloads from "@/pages/PublicDownloads";
-import DownloadsCenter from "@/pages/DownloadsCenter";
 
 /** 定制页：保留独立前端实现，由频道 page_type=CUSTOM 触发 */
 const CUSTOM_PAGE_REGISTRY: Record<string, React.ComponentType> = {
   services: Services,
   public_files: PublicDownloads,
-  downloads: DownloadsCenter,
 };
 
 interface CmsDynamicPageProps {

@@ -8,6 +8,7 @@ import com.chuanghai.paleo.cms.security.Anonymous;
 import com.chuanghai.paleo.cms.security.JwtTokenUtil;
 import com.chuanghai.paleo.cms.security.LoginUser;
 import com.chuanghai.paleo.cms.service.PaleoMemberProfileService;
+import com.chuanghai.paleo.cms.service.PaleoMembershipStatusService;
 import com.chuanghai.paleo.cms.service.PaleoUserService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -28,6 +29,9 @@ public class UserAuthController extends BaseController {
 
     @Autowired
     private PaleoMemberProfileService memberProfileService;
+
+    @Autowired
+    private PaleoMembershipStatusService membershipStatusService;
 
     @Autowired
     private JwtTokenUtil jwtTokenUtil;
@@ -80,6 +84,7 @@ public class UserAuthController extends BaseController {
         Map<String, Object> data = new HashMap<>();
         data.put("user", userService.sanitize(user));
         data.put("profile", profile);
+        data.put("membershipStatus", membershipStatusService.resolveForUser(userId));
         return success(data);
     }
 
@@ -152,6 +157,7 @@ public class UserAuthController extends BaseController {
         data.put("token", token);
         data.put("user", user);
         data.put("profile", memberProfileService.getOrCreate(user.getUserId(), user.getEmail()));
+        data.put("membershipStatus", membershipStatusService.resolveForUser(user.getUserId()));
         return data;
     }
 }

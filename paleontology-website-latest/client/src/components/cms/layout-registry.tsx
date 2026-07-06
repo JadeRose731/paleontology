@@ -10,6 +10,7 @@ import {
   CmsFileListLayout,
   CmsTopicsLayout,
   CmsInternationalLayout,
+  CmsScienceLayout,
   CmsListMultiColumnLayout,
 } from "@/components/cms/cms-layouts";
 
@@ -23,6 +24,7 @@ export const LAYOUT_REGISTRY: Record<string, ComponentType<CmsLayoutProps>> = {
   "file-list": CmsFileListLayout,
   mixed: CmsRichTextLayout,
   international: CmsInternationalLayout,
+  science: CmsScienceLayout,
 };
 
 /** 按频道编码覆盖版式（特殊页） */
@@ -30,6 +32,7 @@ export const CHANNEL_LAYOUT_OVERRIDE: Record<string, ComponentType<CmsLayoutProp
   regulations: CmsRegulationsLayout,
   party_topics: CmsTopicsLayout,
   international: CmsInternationalLayout,
+  science: CmsScienceLayout,
 };
 
 export function resolveLayoutComponent(
