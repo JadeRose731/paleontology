@@ -197,6 +197,23 @@ public class PaleoAdminAssociationService {
         return result;
     }
 
+    public List<Map<String, Object>> listBranchAssociations() {
+        List<PaleoAssociation> branches = associationMapper.selectList(new LambdaQueryWrapper<PaleoAssociation>()
+                .isNotNull(PaleoAssociation::getBranchCode)
+                .ne(PaleoAssociation::getBranchCode, "zgswxh")
+                .orderByAsc(PaleoAssociation::getSortOrder));
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (PaleoAssociation assoc : branches) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("associationId", assoc.getAssociationId());
+            row.put("branchCode", assoc.getBranchCode());
+            row.put("associationName", assoc.getAssociationName());
+            rows.add(row);
+        }
+        return rows;
+    }
+
     private List<Long> listBoundAssociationIds(Long adminUserId) {
         if (adminUserId == null) {
             return new ArrayList<>();

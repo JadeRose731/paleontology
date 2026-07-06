@@ -31,6 +31,9 @@ public class PaleoConferenceRegistrationService extends ServiceImpl<PaleoConfere
     @Autowired
     private AdminScopeService adminScopeService;
 
+    @Autowired
+    private PaleoRecognitionService recognitionService;
+
     public PaleoConference findByCode(String conferenceCode) {
         if (!StringUtils.hasText(conferenceCode)) {
             return null;
@@ -118,7 +121,11 @@ public class PaleoConferenceRegistrationService extends ServiceImpl<PaleoConfere
             throw new IllegalArgumentException("未知会议费文件类型: " + fileRole);
         }
         reg.setUpdateBy(operator);
-        return updateById(reg);
+        boolean updated = updateById(reg);
+        if (updated) {
+            recognitionService.recordConferenceUpload(reg, fileRole, fileUrl);
+        }
+        return updated;
     }
 
     public boolean review(Long registrationId, String paymentStatus, String reviewComment, String reviewer) {

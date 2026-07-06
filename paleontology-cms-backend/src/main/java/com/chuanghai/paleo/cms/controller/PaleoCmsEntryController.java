@@ -6,9 +6,11 @@ import com.chuanghai.paleo.cms.common.AjaxResult;
 import com.chuanghai.paleo.cms.common.BaseController;
 import com.chuanghai.paleo.cms.common.TableDataInfo;
 import com.chuanghai.paleo.cms.domain.PaleoCmsEntry;
+import com.chuanghai.paleo.cms.common.AuditAction;
 import com.chuanghai.paleo.cms.security.Anonymous;
 import com.chuanghai.paleo.cms.security.LoginUser;
 import com.chuanghai.paleo.cms.service.AdminScopeService;
+import com.chuanghai.paleo.cms.service.AuditLogService;
 import com.chuanghai.paleo.cms.service.LocalFileStorageService;
 import com.chuanghai.paleo.cms.service.PaleoCmsEntryService;
 import io.swagger.annotations.Api;
@@ -36,6 +38,9 @@ public class PaleoCmsEntryController extends BaseController {
 
     @Autowired
     private LocalFileStorageService fileStorageService;
+
+    @Autowired
+    private AuditLogService auditLogService;
 
     @ApiOperation("管理端-分页列表")
     @GetMapping("/list")
@@ -197,9 +202,17 @@ public class PaleoCmsEntryController extends BaseController {
         if (!"DRAFT".equals(status) && !"PUBLISHED".equals(status) && !"ARCHIVED".equals(status)) {
             return error("状态仅支持 DRAFT/PUBLISHED/ARCHIVED");
         }
+        String beforeStatus = entry.getStatus();
         entry.setStatus(status);
         entry.setUpdateBy(getUsername());
-        return toAjax(cmsEntryService.updateById(entry));
+        boolean ok = cmsEntryService.updateById(entry);
+        if (ok && !status.equals(beforeStatus)) {
+            String action = "PUBLISHED".equals(status) ? AuditAction.CMS_PUBLISH : AuditAction.CMS_UNPUBLISH;
+            auditLogService.log(user, action, "cms", String.valueOf(entryId), entry.getAssociationId(),
+                    String.format("CMS 内容状态变更：%s → %s（%s）", beforeStatus, status, entry.getTitle()),
+                    auditLogService.detailSnapshot(beforeStatus, status, null));
+        }
+        return toAjax(ok);
     }
 
     @ApiOperation("逻辑删除")

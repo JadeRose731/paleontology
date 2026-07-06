@@ -17,6 +17,9 @@ import ConferenceManagement from "@/pages/admin/ConferenceManagement";
 import Statistics from "@/pages/admin/Statistics";
 import FinanceRecords from "@/pages/admin/FinanceRecords";
 import BranchManagement from "@/pages/admin/BranchManagement";
+import AuditTrail from "@/pages/admin/AuditTrail";
+import RecognitionManagement from "@/pages/admin/RecognitionManagement";
+import ScopeManagement from "@/pages/admin/ScopeManagement";
 import ContentManagement from "@/pages/admin/cms/ContentManagement";
 import ChannelManagement from "@/pages/admin/cms/ChannelManagement";
 import NotFound from "@/pages/admin/NotFound";
@@ -87,6 +90,27 @@ export default function App() {
         {() => (
           <WrappedPage>
             <BranchManagement />
+          </WrappedPage>
+        )}
+      </Route>
+      <Route path="/admin/audit-trail">
+        {() => (
+          <WrappedPage>
+            <AuditTrail />
+          </WrappedPage>
+        )}
+      </Route>
+      <Route path="/admin/recognition">
+        {() => (
+          <WrappedPage>
+            <RecognitionManagement />
+          </WrappedPage>
+        )}
+      </Route>
+      <Route path="/admin/scope">
+        {() => (
+          <WrappedPage>
+            <ScopeManagement />
           </WrappedPage>
         )}
       </Route>

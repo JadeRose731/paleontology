@@ -10,6 +10,7 @@ import com.chuanghai.paleo.cms.domain.PaleoConferenceRegistration;
 import com.chuanghai.paleo.cms.security.LoginUser;
 import com.chuanghai.paleo.cms.security.RequireAdminRole;
 import com.chuanghai.paleo.cms.service.AdminScopeService;
+import com.chuanghai.paleo.cms.service.AuditLogService;
 import com.chuanghai.paleo.cms.mapper.PaleoConferenceMapper;
 import com.chuanghai.paleo.cms.service.LocalFileStorageService;
 import com.chuanghai.paleo.cms.service.PaleoConferenceRegistrationService;
@@ -40,6 +41,9 @@ public class PaleoConferenceController extends BaseController {
 
     @Autowired
     private AdminScopeService adminScopeService;
+
+    @Autowired
+    private AuditLogService auditLogService;
 
     @ApiOperation("公开-开放会议列表")
     @GetMapping("/public/list")
@@ -133,11 +137,22 @@ public class PaleoConferenceController extends BaseController {
         } catch (Exception ex) {
             return error(ex.getMessage());
         }
-        return toAjax(registrationService.review(
+        PaleoConferenceRegistration reg = registrationService.getById(registrationId);
+        if (reg == null) {
+            return error("报名记录不存在");
+        }
+        String beforeStatus = reg.getPaymentStatus();
+        String afterStatus = body.get("paymentStatus");
+        boolean ok = registrationService.review(
                 registrationId,
-                body.get("paymentStatus"),
+                afterStatus,
                 body.get("reviewComment"),
-                getUsername()));
+                getUsername());
+        if (ok) {
+            auditLogService.logConferenceRegistrationReview(currentUser(), registrationId,
+                    reg.getAssociationId(), beforeStatus, afterStatus, body.get("reviewComment"));
+        }
+        return toAjax(ok);
     }
 
     @RequireAdminRole({"super_admin", "branch_admin", "finance_reviewer"})

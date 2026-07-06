@@ -18,6 +18,7 @@ import com.chuanghai.paleo.cms.domain.PaleoMembershipTemplate;
 import com.chuanghai.paleo.cms.security.LoginUser;
 import com.chuanghai.paleo.cms.security.RequireAdminRole;
 import com.chuanghai.paleo.cms.service.AdminScopeService;
+import com.chuanghai.paleo.cms.service.AuditLogService;
 import com.chuanghai.paleo.cms.service.PaleoMembershipTemplateService;
 import com.chuanghai.paleo.cms.service.PaleoUserService;
 import com.chuanghai.paleo.cms.security.Anonymous;
@@ -62,6 +63,9 @@ public class PaleoMembershipController extends BaseController {
 
     @Autowired
     private AdminScopeService adminScopeService;
+
+    @Autowired
+    private AuditLogService auditLogService;
 
     @Anonymous
     @ApiOperation("公开-入会/退会申请书模板")
@@ -203,11 +207,22 @@ public class PaleoMembershipController extends BaseController {
     @ApiOperation("管理端-审核入会/退会申请")
     @PostMapping("/applications/{applicationId}/review")
     public AjaxResult reviewApplication(@PathVariable Long applicationId, @RequestBody Map<String, String> body) {
-        return toAjax(applicationService.review(
+        PaleoMembershipApplication application = applicationService.getById(applicationId);
+        if (application == null) {
+            return error("申请不存在");
+        }
+        String beforeStatus = application.getReviewStatus();
+        String afterStatus = body.get("reviewStatus");
+        boolean ok = applicationService.review(
                 applicationId,
-                body.get("reviewStatus"),
+                afterStatus,
                 body.get("reviewComment"),
-                getUsername()));
+                getUsername());
+        if (ok) {
+            auditLogService.logApplicationReview(currentUser(), applicationId,
+                    application.getApplicationType(), beforeStatus, afterStatus, body.get("reviewComment"));
+        }
+        return toAjax(ok);
     }
 
     @ApiOperation("上传我的申请书")
@@ -297,11 +312,22 @@ public class PaleoMembershipController extends BaseController {
     @ApiOperation("管理端-审核会员费")
     @PostMapping("/payments/{paymentId}/review")
     public AjaxResult reviewPayment(@PathVariable Long paymentId, @RequestBody Map<String, String> body) {
-        return toAjax(paymentService.review(
+        PaleoMembershipPayment payment = paymentService.getById(paymentId);
+        if (payment == null) {
+            return error("缴费记录不存在");
+        }
+        String beforeStatus = payment.getPaymentStatus();
+        String afterStatus = body.get("paymentStatus");
+        boolean ok = paymentService.review(
                 paymentId,
-                body.get("paymentStatus"),
+                afterStatus,
                 body.get("reviewComment"),
-                getUsername()));
+                getUsername());
+        if (ok) {
+            auditLogService.logMembershipPaymentReview(currentUser(), paymentId, payment.getUserId(),
+                    beforeStatus, afterStatus, body.get("reviewComment"));
+        }
+        return toAjax(ok);
     }
 
     @ApiOperation("上传我的会员费文件")

@@ -22,6 +22,9 @@ public class PaleoMembershipPaymentService extends ServiceImpl<PaleoMembershipPa
     @Autowired
     private PaleoMemberProfileService memberProfileService;
 
+    @Autowired
+    private PaleoRecognitionService recognitionService;
+
     public boolean attachFile(Long paymentId, String fileRole, String fileUrl, String operator) {
         PaleoMembershipPayment payment = getById(paymentId);
         if (payment == null) {
@@ -42,7 +45,11 @@ public class PaleoMembershipPaymentService extends ServiceImpl<PaleoMembershipPa
             throw new IllegalArgumentException("未知会员费文件类型: " + fileRole);
         }
         payment.setUpdateBy(operator);
-        return updateById(payment);
+        boolean updated = updateById(payment);
+        if (updated) {
+            recognitionService.recordMembershipUpload(payment, fileRole, fileUrl);
+        }
+        return updated;
     }
 
     public boolean review(Long paymentId, String paymentStatus, String reviewComment, String reviewer) {

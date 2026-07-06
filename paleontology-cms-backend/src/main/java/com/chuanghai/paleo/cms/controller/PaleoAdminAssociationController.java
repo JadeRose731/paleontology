@@ -4,6 +4,9 @@ import com.chuanghai.paleo.cms.common.AjaxResult;
 import com.chuanghai.paleo.cms.common.BaseController;
 import com.chuanghai.paleo.cms.security.LoginUser;
 import com.chuanghai.paleo.cms.security.RequireAdminRole;
+import com.chuanghai.paleo.cms.common.AuditAction;
+import com.chuanghai.paleo.cms.service.AuditLogService;
+import com.chuanghai.paleo.cms.domain.PaleoAdminAssociation;
 import com.chuanghai.paleo.cms.service.PaleoAdminAssociationService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -15,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +30,9 @@ public class PaleoAdminAssociationController extends BaseController {
 
     @Autowired
     private PaleoAdminAssociationService adminAssociationService;
+
+    @Autowired
+    private AuditLogService auditLogService;
 
     @ApiOperation("当前管理员绑定的分会")
     @GetMapping("/mine")
@@ -51,6 +59,13 @@ public class PaleoAdminAssociationController extends BaseController {
     }
 
     @RequireAdminRole("super_admin")
+    @ApiOperation("分会列表（数据权限配置用）")
+    @GetMapping("/branches")
+    public AjaxResult branches() {
+        return success(adminAssociationService.listBranchAssociations());
+    }
+
+    @RequireAdminRole("super_admin")
     @ApiOperation("绑定管理员与分会")
     @PostMapping("/bindings")
     public AjaxResult bind(@RequestBody Map<String, Long> body) {
@@ -60,7 +75,15 @@ public class PaleoAdminAssociationController extends BaseController {
             return error("adminUserId 与 associationId 不能为空");
         }
         try {
-            return success(adminAssociationService.bind(adminUserId, associationId));
+            PaleoAdminAssociation binding = adminAssociationService.bind(adminUserId, associationId);
+            Map<String, Object> detail = new HashMap<>();
+            detail.put("adminUserId", adminUserId);
+            detail.put("associationId", associationId);
+            auditLogService.log(currentUser(), AuditAction.ADMIN_BINDING_CREATE, "binding",
+                    String.valueOf(binding.getBindingId()), associationId,
+                    String.format("绑定管理员 userId=%d 与分会 associationId=%d", adminUserId, associationId),
+                    detail);
+            return success(binding);
         } catch (IllegalArgumentException ex) {
             return error(ex.getMessage());
         }
@@ -75,7 +98,17 @@ public class PaleoAdminAssociationController extends BaseController {
         if (adminUserId == null || associationId == null) {
             return error("adminUserId 与 associationId 不能为空");
         }
-        return toAjax(adminAssociationService.unbind(adminUserId, associationId));
+        boolean ok = adminAssociationService.unbind(adminUserId, associationId);
+        if (ok) {
+            Map<String, Object> detail = new HashMap<>();
+            detail.put("adminUserId", adminUserId);
+            detail.put("associationId", associationId);
+            auditLogService.log(currentUser(), AuditAction.ADMIN_BINDING_REMOVE, "binding",
+                    adminUserId + ":" + associationId, associationId,
+                    String.format("解绑管理员 userId=%d 与分会 associationId=%d", adminUserId, associationId),
+                    detail);
+        }
+        return toAjax(ok);
     }
 
     @RequireAdminRole("super_admin")
@@ -90,7 +123,16 @@ public class PaleoAdminAssociationController extends BaseController {
         @SuppressWarnings("unchecked")
         List<Long> associationIds = (List<Long>) body.get("associationIds");
         try {
-            return success(adminAssociationService.replaceBindings(adminUserId, associationIds));
+            List<PaleoAdminAssociation> bindings = adminAssociationService.replaceBindings(adminUserId, associationIds);
+            Map<String, Object> detail = new HashMap<>();
+            detail.put("adminUserId", adminUserId);
+            detail.put("associationIds", associationIds != null ? associationIds : Collections.<Long>emptyList());
+            auditLogService.log(currentUser(), AuditAction.ADMIN_BINDING_CREATE, "binding",
+                    String.valueOf(adminUserId), null,
+                    String.format("批量替换管理员 userId=%d 的分会绑定（共 %d 项）", adminUserId,
+                            associationIds != null ? associationIds.size() : 0),
+                    detail);
+            return success(bindings);
         } catch (IllegalArgumentException ex) {
             return error(ex.getMessage());
         }

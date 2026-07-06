@@ -292,3 +292,13 @@ export async function replaceAdminAssociationBindings(adminUserId: number, assoc
     body: JSON.stringify({ adminUserId, associationIds }),
   });
 }
+
+export interface ApiBranchAssociation {
+  associationId: number;
+  branchCode?: string;
+  associationName?: string;
+}
+
+export async function fetchAdminBranchAssociations() {
+  return request<ApiBranchAssociation[]>("/paleo/admin/associations/branches");
+}

@@ -29,3 +29,22 @@ export function getFilePreviewKind(url: string, fileName?: string): FilePreviewK
   if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(ext)) return "office";
   return "unknown";
 }
+
+/** 在新标签页打开文件（支持 data URL 与远程 URL） */
+export function openFilePreview(url: string, fileName?: string): void {
+  if (!url) return;
+  if (url.startsWith("data:")) {
+    const w = window.open();
+    if (w) {
+      w.document.write(`<title>${fileName || "文件预览"}</title>`);
+      if (getFilePreviewKind(url, fileName) === "image") {
+        w.document.write(`<img src="${url}" style="max-width:100%;height:auto;" />`);
+      } else {
+        w.document.write(`<iframe src="${url}" style="width:100%;height:100vh;border:none;"></iframe>`);
+      }
+    }
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
